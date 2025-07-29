@@ -1,0 +1,53 @@
+{% if not request.headers.get("Hx-Request") %}
+  {% extends "base.html" %}
+{% endif %}
+
+{% block breadcrumb %}
+<nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
+  <ul>
+    <li><span>Objects</span></li>
+    <li><a href="#" hx-target="#body-main" hx-get="/objects/{{ request.view_args.get("object_type") }}">{{ request.view_args.get("object_type")|capitalize }}</a></li>
+    <li><a href="#" hx-target="#body-main" hx-get="/objects/{{ request.view_args.get("object_type") }}/{{ object.id }}">{{ object.name }}</a></li>
+  </ul>
+</nav>
+{% endblock breadcrumb %}
+
+{% block body %}
+
+<section class="grid split-grid">
+  <article class="hide-below-lg">
+    <hgroup>
+      <h5 id="object-name">{{ object.name }}</h5>
+      <p>
+        Verändere die Details eines Objekt in dieser Maske.
+      </p>
+      <hr>
+      <p>
+        <small>Ein Wert, der mit einem ⚠️ Symbol markiert ist, kann nicht verändert werden.</small>
+      </p>
+    </hgroup>
+  </article>
+
+  <div id="object-details"
+    hx-trigger="htmx:afterRequest[event.detail.successful==true] from:#object-form"
+    hx-target="this"
+    hx-select="#object-details"
+    hx-select-oob="#object-name"
+    hx-swap="outerHTML"
+    hx-get="/objects/{{ request.view_args.get("object_type") }}/{{ object.id }}">
+
+    <form id="object-form" hx-trigger="submit throttle:200ms" hx-patch="/objects/{{ request.view_args.get("object_type") }}/{{ object.id }}">
+      {% with
+        schema=schemas[request.view_args.object_type],
+        system_fields=system_fields[request.view_args.object_type],
+        current_data=object.details,
+        root_key="details"
+      %}
+        {% include "includes/form_builder.html" %}
+      {% endwith %}
+      <button data-loading-disable data-loading-aria-busy type="submit">Änderung speichern</button>
+    </form>
+  </div>
+</section>
+
+{% endblock body %}

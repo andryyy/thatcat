@@ -1,0 +1,8 @@
+quart
+jinja2
+pydantic
+webauthn
+email-validator
+tinydb
+aiotinydb
+python-magic

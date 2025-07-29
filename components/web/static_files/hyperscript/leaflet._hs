@@ -1,0 +1,152 @@
+behavior selectFromLeaflet(formId, options)
+  init
+    put `<mark style="display: none" id="leaflet-project-name-${formId}"></mark>` into #{'leaflet-map-' + formId}
+    set :markers to {}
+    if not options.coords
+      call drawMap(51.1, 6.7, 12)
+    else
+      call drawMap(options.coords.lat, options.coords.lon, options.coords.zoom or 12)
+      call setPos(options.coords.lat, options.coords.lon, options.coords.display_name, true)
+      put options.coords.display_name into #{'leaflet-marker-name-' + formId}
+    end
+    trigger afterDraw on #{'leaflet-current-position-' + formId}
+    call fitToMarkers()
+    hide #{'leaflet-loading-' + formId}
+  end
+
+  on htmx:beforeHistorySave from body
+    halt the event exit
+  end
+
+  def logError(err)
+    log `POSITION ERROR (${err.code}): ${err.message}`
+  end
+
+  on unfreeze
+    set options.frozen to false
+  end
+
+  on keydown[keyCode == 13] from #{'leaflet-search-query-' + formId} throttled at 1s
+    set searchQuery to event.target's value
+    if searchQuery
+      fetch `/location/search/${searchQuery}` with method:'GET', headers:{content-type:'application/json'}
+      call setPos(result.lat, result.lon, result.display_name, true) unless not result
+    end
+  end
+
+  on change from <input[type=checkbox]/> in #{'leaflet-additional-markers-' + formId}
+    set markerId to (event.target's @data-marker as Object).id
+    remove .hidden from :markers[markerId]._path unless not event.target.checked
+    add .hidden to :markers[markerId]._path unless event.target.checked
+    call fitToMarkers()
+  end
+
+  on click from #{'leaflet-current-position-' + formId} or afterDraw
+    put '' into #{'leaflet-current-accuracy-' + formId}
+    set @aria-busy of #{'leaflet-current-position-' + formId} to 'true'
+    call navigator.geolocation.getCurrentPosition(selfCoordsUpdate, logError, {
+      enableHighAccuracy: true
+    })
+    wait for currentPosUpdated(pos) or 4 s
+    if the result's type is 'currentPosUpdated'
+      if pos.coords.accuracy < 1000
+        put (pos.coords.accuracy as Int) + ' Meter' into #{'leaflet-current-accuracy-' + formId}
+        if event's type is 'click'
+          call :map.flyTo([pos.coords.latitude, pos.coords.longitude], 12)
+        end
+      else
+        put 'nicht ermittelbar' into #{'leaflet-current-accuracy-' + formId}
+      end
+    end
+    remove @aria-busy from #{'leaflet-current-position-' + formId}
+  end
+
+  def selfCoordsUpdate(pos)
+    if :map
+      if not :currentPositionMarker
+        if pos.coords.accuracy < 1000
+          call L.circle([pos.coords.latitude, pos.coords.longitude],{
+            color: 'red', weight: 1, interactive: false, fillColor: 'orangered', fillOpacity: 0.1, radius: (pos.coords.accuracy)
+          }).addTo(:map)
+            set :currentPositionMarker to result
+        end
+      else
+        call :currentPositionMarker.setLatLng([pos.coords.latitude, pos.coords.longitude])
+        call :currentPositionMarker.setRadius(pos.coords.accuracy)
+      end
+    end
+    trigger currentPosUpdated(pos: pos) on #{'leaflet-current-position-' + formId}
+  end
+
+  def fitToMarkers
+    if :selectionMarker
+      set markerPos to [:selectionMarker.getLatLng()]
+    else
+      set markerPos to []
+    end
+    repeat for m in Object.values(:markers)
+      append m.getLatLng() to markerPos unless m._path matches .hidden
+    end
+    call :map.fitBounds(markerPos, {maxZoom: 12}) unless (length of markerPos) == 0
+  end
+
+  def setPos(lat, lon, name, flyTo)
+    set name to '' unless name
+    set flyTo to false unless flyTo
+    if :selectionMarker
+      call :selectionMarker.setLatLng([lat, lon]) unless options.frozen
+    else
+      call L.marker([lat, lon], {bubblingMouseEvents: false, markerName: name}).addTo(:map).on('click', handleClick)
+        set :selectionMarker to result
+    end
+    call :map.flyTo([lat, lon], 12) unless not flyTo
+    if not options.frozen
+      put name into #{'leaflet-marker-name-' + formId}
+      set value of #{'leaflet-lat-' + formId} to lat
+      set value of #{'leaflet-lon-' + formId} to lon
+      set value of #{'leaflet-display-name-' + formId} to name
+    end
+  end
+
+  def handleMouse(e)
+    if e's type is 'mouseout'
+      hide #{'leaflet-project-name-' + formId}
+      put '' into #{'leaflet-project-name-' + formId}
+    else
+      put e.target.options.projectName into #{'leaflet-project-name-' + formId}
+      show #{'leaflet-project-name-' + formId}
+    end
+  end
+
+  def handleClick(e)
+    call setPos(e.latlng.lat, e.latlng.lng, [e.latlng.lat, e.latlng.lng].join(','), false)
+  end
+
+  def drawMap(lat, lon, zoom)
+    call L.map(#{'leaflet-map-' + formId}).setView([lat, lon], zoom)
+      set :map to result
+    then call L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap'}).addTo(:map)
+    then call :map.on('click', handleClick)
+
+    repeat for m in (<[data-marker]/> in #{'leaflet-additional-markers-' + formId}) index idx
+      set markerData to (@data-marker of m) as Object
+      call L.circle([markerData.coords.lat, markerData.coords.lon], {
+        projectName: markerData.name,
+        projectCoordsDisplayName: markerData.coords.display_name,
+        color: '#1E90FF',
+        weight: 1,
+        fillColor: '#00BFFF',
+        fillOpacity: 0.2,
+        radius: markerData.radius,
+        bubblingMouseEvents: false,
+        className: markerData.class
+      }).addTo(:map)
+        set :markers[markerData.id] to result
+        call :markers[markerData.id].on('mouseover', handleMouse).on('mouseout', handleMouse)
+    end
+    remove @hidden from #{'leaflet-controls-' + formId}
+  end
+end
+

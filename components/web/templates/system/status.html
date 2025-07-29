@@ -1,0 +1,76 @@
+{% if not request.headers.get("Hx-Request") %}
+  {% extends "base.html" %}
+{% endif %}
+
+{% block breadcrumb %}
+<nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
+  <ul>
+    <li><span>System</span></li>
+    <li><a href="#" hx-target="#body-main" hx-get="{{ request.path }}">Status</a></li>
+  </ul>
+</nav>
+{% endblock breadcrumb %}
+
+{% block body %}
+
+<h5>System Status - <a href="#" class="no-text-decoration"
+    hx-on:click="!window.s?s=this.textContent:null;this.textContent='👍';setTimeout(()=>{this.textContent=s}, 1000)"
+    hx-target="#system-status-cards"
+    hx-select="#system-status-cards"
+    hx-swap="outerHTML"
+    hx-post="/system/status/refresh"
+    hx-trigger="click throttle:1000ms"
+    hx-vals="">
+    ⟳ Refresh
+  </a>
+</h5>
+
+<div id="system-status">
+  <section id="system-status-cards" class="grid-auto-cols">
+    <article>
+      <h6>{{ data.status.CLUSTER_PEERS_LOCAL.name }} 🏠</h6>
+      <p>
+        <small>This node.</small>
+      </p>
+      <ul>
+      {% for k, v in data.status.CLUSTER_PEERS_LOCAL %}
+        <li><span class="color-zinc-600">{{ k.split("_")|join(" ")|capitalize }}</span>:
+        {% if k == "cluster_complete" and not v %}
+          <span class="color-red">{{ v }}</span>
+        {% else %}
+          {{ v }}<br>
+        {% endif %}
+        </li>
+      {% endfor %}
+      </ul>
+    </article>
+    {% for peer, peer_data in data.status.CLUSTER_PEERS_REMOTE_PEERS.items() %}
+    <article>
+      <h6>{{ peer }} {% if peer == data.status.CLUSTER_PEERS_LOCAL.leader %}👑{% endif %}</h6>
+      <ul>
+      {% for k, v in peer_data %}
+        <li><span class="color-zinc-600">{{ k.split("_")|join(" ")|capitalize }}</span>:
+        {% if k == "streams" %}
+          {% if v.ingress %}Ingress stream OK{% else %}<span class="color-red">Ingress stream failed</span>{% endif %},
+          {% if v.egress %}Egress stream OK{% else %}<span class="color-red">Egress stream failed</span>{% endif %}<br>
+        {% else %}
+          {{ v }}<br>
+        {% endif %}
+        </li>
+      {% endfor %}
+      </ul>
+    </article>
+    {% endfor %}
+  </section>
+</div>
+<hr>
+
+<p class="no-text-wrap">
+  <small>
+    <sup>1</sup> Critical protocol errors (e.g. checksum mismatches).<br>
+    <sup>2</sup> The cluster peer's meta data is updated in transaction (lazy-update).<br>
+  </small>
+</p>
+
+{% endblock body %}
+

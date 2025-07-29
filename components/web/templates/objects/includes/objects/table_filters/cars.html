@@ -1,0 +1,42 @@
+{% set filters = session.get(request.view_args.get("object_type") ~ "_filters") %}
+
+{% if "system" in session.get("acl", []) %}
+<div class="filters" _="install objectFilters(submitForm: #{{ request.view_args.get("object_type") }}-table-search)">
+  <input class="filter-input" type="text" placeholder="Benutzername">
+  <small>Nach Benutzernamen filtern</small>
+  <div class="filter-buttons" hidden>
+    {% for user_id, user_data in request.form_options.users.items() %}
+    <button
+      type="submit"
+      name="_filters"
+      value="assigned_users:{{ user_id|string }}"
+      class="{{ "active button-blue filter-button" if user_id|string in filters["assigned_users"]|ensurelist else "outline primary filter-button" }}">
+    {{ user_data.name }}
+    </button>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="filters" _="install objectFilters(submitForm: #{{ request.view_args.get("object_type") }}-table-search)">
+  <input class="filter-input" type="text" placeholder="Projektname">
+  <small>Nach Projektnamen filter</small>
+  <div class="filter-buttons" hidden>
+    {% for project_id, project_data in request.form_options.projects.items() if project_data.permitted == True %}
+    <button
+      type="submit"
+      name="_filters"
+      value="assigned_project:{{ project_id|string }}"
+      class="{{ "active button-blue filter-button" if project_id|string in filters["assigned_project"]|ensurelist else "outline primary filter-button" }}">
+    {{ project_data.name }}
+    </button>
+    {% endfor %}
+  </div>
+</div>
+
+<div id="table-filters"></div>
+
+<template id="table-filter-item">
+  <input form="{{ request.view_args.get("object_type") }}-table-search" type="hidden" name="filters" value="${value}">
+</template>
+

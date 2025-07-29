@@ -1,0 +1,7 @@
+{% if tasks %}
+  <p aria-busy="true" _="init set $tasks to {{ tasks|length }} wait 1s then fetch '/processings/tasks' put result into #tasks">
+    Verarbeite <b>{{ tasks|length }}</b> Dateien
+  </p>
+{% else %}
+  <p _="init if $tasks set $tasks to 0 trigger reloadProcessings on #processings">✅ Keine Hintergrundaufgaben</p>
+{% endif %}

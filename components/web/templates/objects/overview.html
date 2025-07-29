@@ -1,0 +1,23 @@
+{% if not request.headers.get("Hx-Request") %}
+  {% extends "base.html" %}
+{% endif %}
+
+{% block breadcrumb %}
+<nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
+  <ul>
+    <li><span>Objects</span></li>
+    <li><a href="#" hx-target="#body-main" hx-get="/objects">Kategorien</a></li>
+  </ul>
+</nav>
+{% endblock breadcrumb %}
+
+{% block body %}
+<article>
+  <p>Folgende Kategorien stehen zur Auswahl:</p>
+  <ul hx-push-url="true">
+  {% for object_type in object_types %}
+    <li><a href="#" hx-target="#body-main" hx-get="/objects/{{ object_type }}">{{ object_type|capitalize }}</a></li>
+  {% endfor %}
+  </ul>
+</article>
+{% endblock body %}

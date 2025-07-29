@@ -1,0 +1,43 @@
+{% if not request.headers.get("Hx-Request") %}
+  {% extends "base.html" %}
+{% endif %}
+
+{% block breadcrumb %}
+<nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
+  <ul>
+    <li><span>Objekte</span></li>
+    <li><a href="#" hx-target="#body-main" hx-get="/objects">Kategorien</a></li>
+    <li><a href="#" hx-target="#body-main" hx-get="{{ request.path }}">{{ request.view_args.get("object_type")|capitalize }}</a></li>
+  </ul>
+</nav>
+{% endblock breadcrumb %}
+
+{% block body %}
+
+<h5>{{ request.view_args.get("object_type")|capitalize }} verwalten</h5>
+
+<details class="show-below-lg">
+  <summary>Hinzufügen</summary>
+  <article>
+    <hgroup>
+      <h6>Neues Objekt hinzufügen</h6>
+      <p>Erstelle ein neues Objekt mit einem eindeutigen Namen.</p>
+    </hgroup>
+    {% include "objects/includes/create/" ~ request.view_args.get("object_type") ~ ".html" %}
+  </article>
+</details>
+
+<section class="grid split-grid">
+  <article class="hide-below-lg">
+    <hgroup>
+      <h6>Neues Objekt hinzufügen</h6>
+      <p>Erstelle ein neues Objekt mit einem eindeutigen Namen.</p>
+    </hgroup>
+    {% include "objects/includes/create/" ~ request.view_args.get("object_type") ~ ".html" %}
+  </article>
+  <div id="{{ request.view_args.get("object_type") }}-full-table">
+    {% include "objects/includes/objects/table.html" %}
+  </div>
+</section>
+
+{% endblock body %}

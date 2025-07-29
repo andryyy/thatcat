@@ -1,0 +1,82 @@
+{% if not request.headers.get("Hx-Request") %}
+  {% extends "base.html" %}
+{% endif %}
+
+{% block breadcrumb %}
+<nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
+  <ul>
+    <li><span>Profil</span></li>
+    <li><a href="#" hx-target="#body-main" hx-get="{{ request.path }}">{{ session["login"] }}</a></li>
+  </ul>
+</nav>
+{% endblock breadcrumb %}
+
+{% block body %}
+
+<h5>Persönliche Daten</h5>
+
+<article hx-trigger="htmx:afterRequest[event.detail.successful==true] from:#profile-form" hx-select="#profile-form" hx-get="/profile/" hx-target="#profile-form">
+  <h6>Profil</h6>
+  <form hx-trigger="submit throttle:1s" hx-patch="/profile/edit" id="profile-form">
+    {% with
+      schema=schemas.user_profile,
+      current_data=user.profile
+    %}
+      {% include "includes/form_builder.html" %}
+    {% endwith %}
+    <button data-loading-disable data-loading-aria-busy type="submit">Speichern</button>
+  </form>
+</article>
+
+<section>
+  <h6>Passkeys</h6>
+  <div class="grid-auto-cols">
+    {% for credential in user.credentials|sort(attribute="friendly_name") %}
+    <article id="profile-credential-{{ credential.id|hex }}">
+      <div class="grid-space-between">
+        <div _="install inlineHtmxRename()"
+        contenteditable
+        data-patch-parameter="friendly_name"
+        spellcheck="false"
+        hx-patch="/users/{{ session.id }}/credential/{{ credential.id|hex }}"
+        hx-trigger="editContent">
+          {{- credential.friendly_name -}}
+        </div>
+        {% if session["cred_id"] == credential.id|hex %}
+        <mark>Eingeloggt</mark>
+        {% endif %}
+      </div>
+      <fieldset>
+        <label hx-patch="/users/{{ session.id }}/credential/{{ credential.id|hex }}"
+          hx-params="active"
+          hx-vals='js:{"active":document.getElementById("cred-toggle-{{ credential.id|hex }}").checked}'>
+          <input id="cred-toggle-{{ credential.id|hex }}"
+            type="checkbox"
+            role="switch" {{ "checked" if credential.active }} /> Passkey aktiviert
+        </label>
+      </fieldset>
+      <small>Last Login:
+        {% if credential.last_login %}
+        <span class="" value="{{ credential.last_login }}" _="init set dt to my @value js(dt) return new Date(dt).toLocaleString() end then put result into me"></span>
+        {% else %}-
+        {% endif %}
+      </small>
+      <hr>
+      <a href="#" class="color-red"
+        hx-confirm="Passkey wirklich entfernen?"
+        _="install confirmButton"
+        hx-trigger="confirmedButton throttle:200ms"
+        hx-delete="/users/{{ session.id }}/credential/{{ credential.id|hex }}">Entfernen</a>
+    </article>
+    {% endfor %}
+  </section>
+  <button type="submit" hx-post="/auth/register/webauthn/options"
+    data-loading-disable
+    id="register"
+    hx-target="this"
+    hx-swap="innerHTML">
+      Passkey hinzufügen
+  </button>
+</div>
+
+{% endblock body %}

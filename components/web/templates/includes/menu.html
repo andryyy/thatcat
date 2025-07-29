@@ -1,0 +1,169 @@
+<nav hx-target="#body-main">
+  <ul>
+    <li>
+      <a href="#" hx-get="/">
+        {% include "logo.svg" %}
+      </a>
+      <span aria-busy="true" data-loading></span>
+    </li>
+  </ul>
+  <ul>
+    {% if not session["login"] %}
+    <li>
+      <a class="contrast" role="button" _="
+        on click
+          halt the event
+          get value of <[name=login]/> in #register-form
+          set value of <[name=login]/> in #login-form to it as String
+          toggle @hidden on .login-register
+        end"
+        href="#">
+          <span class="login-register">Registrieren</span>
+          <span class="login-register" hidden>Anmelden</span>
+      </a>
+    </li>
+    {% else %}
+    {% if "system" in session.get("acl", []) or "user" in session.get("acl", []) %}
+    <li>
+      <details class="dropdown" hx-on:click="event.target.nodeName==='A'?this.open=false:null">
+        <summary>🧰</summary>
+        <ul dir="rtl">
+          <li>
+            <a href="#" class="secondary" hx-get="/objects/projects">Projekte</a>
+          </li>
+          <li>
+            <a href="#" class="secondary" hx-get="/objects/cars">Fahrzeuge</a>
+          </li>
+          <li>
+            <a href="#" class="secondary" hx-get="/processings/upload">AI Erfassung</a>
+          </li>
+          {% if "system" in session.get("acl", []) %}
+          <li>
+            <hr>
+            <small>Zugang</small>
+          </li>
+          <li>
+            <a href="#" hx-get="/users">Benutzer</a>
+          </li>
+          <li>
+            <a href="#" hx-get="/groups">Gruppen</a>
+          </li>
+          <li>
+            <hr>
+            <small>System</small>
+          </li>
+          <li>
+            <a href="#" hx-get="/system/logs">Logs</a>
+          </li>
+          <li>
+            <a href="#" hx-get="/system/settings">Einstellungen</a>
+          </li>
+          <li>
+            <a href="#" hx-get="/system/status">Status</a>
+          </li>
+          {% endif %}
+        </ul>
+      </details>
+    </li>
+    {% endif %}
+    <li>
+      <details class="dropdown" hx-on:click="event.target.nodeName==='A'?this.open=false:null">
+        <summary>👤 {{ session.login }}</summary>
+        <ul dir="rtl">
+          <li>
+            <a href="#" hx-get="/profile/">Profil</a>
+          </li>
+          <li>
+            <hr>
+            <a href="#" hx-post="/logout" hx-swap="innerHTML">Abmelden</a>
+          </li>
+        </ul>
+      </details>
+    </li>
+    {% endif %}
+  </ul>
+</nav>
+
+<details name="quick-control">
+  <summary>Schnellwahl & Einstellungen</summary>
+  {% if session["login"] %}
+  <div hx-target="#body-main" class="grid-space-between">
+    <button class="contrast outline"
+    id="menu-vault-dialog-toggle"
+    _="on click
+      halt the event
+      add @open to #menu-vault-dialog
+      call #menu-dialog-vault-unlock-pin.focus()
+    end">
+      Tresor <span id="menu-vault-indicator"></span>
+    </button>
+    <div>
+    {% for role in session.get("acl", []) %}
+      <mark>{{ role }}</mark>
+    {% endfor %}
+    </div>
+  </div>
+  <dialog id="menu-vault-dialog">
+    <article>
+      <header>
+        <h6>Manage tresor</h6>
+      </header>
+      <p>Enter your password below. The tresor will be kept unlocked until you refresh the window or lock it.</p>
+      <fieldset _="install tresorToggle">
+        <input hx-disable
+          id="menu-dialog-vault-unlock-pin"
+          name="menu-dialog-vault-unlock-pin"
+          type="password"
+          autocomplete="off"
+          autocorrect="off"
+          data-protonpass-ignore="true"
+          autocapitalize="off"
+          spellcheck="false"/>
+        <a role="button" href="#" id="menu-dialog-vault-unlock" data-tresor="{{ session.profile.tresor or "" }}">...</a>
+      </fieldset>
+      <footer>
+        <button _="on click remove @open from closest <dialog/>">Close</button>
+      </footer>
+    </article>
+  </dialog>
+  {% endif %}
+
+  <div hx-target="#body-main" class="grid-end">
+    <span id="ws-indicator"
+      {% if session["login"] %}
+      class="no-text-decoration"
+      data-tooltip="Disconnected"
+      {% else %}
+      class="no-text-decoration dark"
+      data-tooltip="Not logged in"
+      {% endif %}
+      hx-swap-oob="outerHTML">⭕</span>
+    <span id="nav-theme-bulb"
+      _="on updateTheme
+          if not localStorage.theme
+            if window.matchMedia('(prefers-color-scheme: light)').matches
+              set (@data-theme of <html/>) to 'light'
+            else
+              set (@data-theme of <html/>) to 'dark'
+            end
+          else
+            set (@data-theme of <html/>) to localStorage.theme
+          end
+          set my @class to (@data-theme of <html/>)
+          set localStorage.theme to (@data-theme of <html/>)
+        end
+        init trigger updateTheme end
+        on click
+          halt the event
+          if I match .light
+            set (@data-theme of <html/>) to 'dark'
+          else
+            set (@data-theme of <html/>) to 'light'
+          end
+          set localStorage.theme to (@data-theme of <html/>)
+          toggle between .light and .dark
+        end
+      ">&#128161;
+    </span>
+  </div>
+</details>

@@ -1,0 +1,128 @@
+behavior tresorConfig(formId, isInit)
+  on keydown[keyCode == 13] from <input/> in me
+    halt the event
+    trigger click on <a/> in me
+  end
+
+  on click from #{'tresor-apply-' + formId} in me
+    if not isInit
+      halt the event
+      remove @aria-invalid from <[aria-invalid]/> in me
+      if not value of #{'tresor-password-' + formId}
+        add [@aria-invalid=true] to #{'tresor-password-' + formId} throw "Passwort fehlt"
+      end
+      if value of #{'tresor-password-' + formId} != value of #{'tresor-password2-' + formId}
+        add [@aria-invalid=true] to #{'tresor-password2-' + formId} throw "Passwort-Wiederholung fehlt"
+      end
+      call VaultSetupUserCryptoAndSend(value of #{'tresor-password-' + formId})
+      set value of #{formId} to (result as JSON)
+      call window.vault.lock()
+      trigger submit on closest <form/>
+    else
+      halt the event
+      remove @aria-invalid from <[aria-invalid]/> in me
+      if not value of #{'tresor-password-' + formId}
+        add [@aria-invalid=true] to #{'tresor-password-' + formId} throw "Aktuelles Passwort fehlt"
+      end
+      if not value of #{'tresor-password-new-' + formId}
+        add [@aria-invalid=true] to #{'tresor-password-new-' + formId} throw "Neues Passwort fehlt"
+      end
+      if value of #{'tresor-password-new-' + formId} != value of #{'tresor-password-new2-' + formId}
+        add [@aria-invalid=true] to #{'tresor-password-new2-' + formId} throw "Passwort-Wiederholung fehlerhaft"
+      end
+      set previousLock to window.vault.isUnlocked()
+      call JSON.parse(value of #{formId}) set keyData to the result
+      call VaultChangePassword(value of #{'tresor-password-' + formId}, value of #{'tresor-password-new-' + formId}, keyData)
+      call window.vault.exportPayload()
+      set value of #{formId} to (result as JSON)
+      if not previousLock call window.vault.lock() end
+      trigger submit on closest <form/>
+    end
+  end
+
+  on exception(error)
+      trigger notification(level: 'error', title: 'Tresor Fehler', message: error, duration: 3000)
+  end
+end
+
+
+behavior tresorToggle
+  def setUnlocked
+    get #menu-dialog-vault-unlock-pin
+      add @disabled to it
+      set its @placeholder to 'Tresor is unlocked'
+    get #menu-dialog-vault-unlock
+      set its textContent to 'Unlock'
+      remove @disabled from it
+    set #menu-vault-indicator's textContent to 'unlocked ✅'
+  end
+
+  def setLocked
+    get #menu-dialog-vault-unlock-pin
+      remove @disabled from it
+      set its @placeholder to 'Tresor password'
+    get #menu-dialog-vault-unlock
+      set its textContent to 'Unlock'
+      remove @disabled from it
+    set #menu-vault-indicator's textContent to 'locked 🔒'
+  end
+
+  def noTresor
+    get #menu-dialog-vault-unlock-pin
+      add @disabled to it
+      set its @placeholder to 'No tresor available'
+    get #menu-dialog-vault-unlock
+      add @disabled to it
+      set its textContent to 'Not available'
+    set #menu-vault-indicator's textContent to 'not available ⛔'
+  end
+
+  init
+    if window.vault.isUnlocked()
+      call setUnlocked()
+    else
+      if #menu-dialog-vault-unlock's @data-tresor != ""
+        call setLocked()
+      else
+        call noTresor()
+      end
+    end
+  end
+
+  on profileUpdate from body
+    exit unless #menu-dialog-vault-unlock's @data-tresor == ""
+    if value of event.detail
+      set #menu-dialog-vault-unlock's @data-tresor to (value of event.detail)
+      call setLocked()
+    end
+  end
+
+  on keydown[keyCode == 13] from #menu-dialog-vault-unlock-pin
+    trigger click on #menu-dialog-vault-unlock unless #menu-dialog-vault-unlock-pin's value is empty
+  end
+
+  on click from #menu-dialog-vault-unlock
+    halt the event
+    if not window.vault.isUnlocked()
+      throw "No PIN" unless value of #menu-dialog-vault-unlock-pin
+      call JSON.parse(#menu-dialog-vault-unlock's @data-tresor) set keyData to the result
+      call VaultUnlockPrivateKey(value of #menu-dialog-vault-unlock-pin, keyData)
+      call setUnlocked()
+    else
+      call window.vault.lock()
+      call setLocked()
+    end
+    set value of #menu-dialog-vault-unlock-pin to ''
+    remove @open from closest <dialog/>
+  end
+
+  on exception(error)
+    trigger notification(
+      title: 'Tresor error',
+      level: 'validationError',
+      message: 'Could not unlock tresor, check your PIN',
+      duration: 3000,
+      locations: ['menu-vault-unlock-pin']
+    )
+  end
+end

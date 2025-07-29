@@ -1,0 +1,31 @@
+{% if not request.headers.get("Hx-Request") %}
+  {% extends "base.html" %}
+{% endif %}
+
+{% block breadcrumb %}
+<nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
+  <ul>
+    <li><span>System</span></li>
+    <li><a href="#" hx-target="#body-main" hx-get="{{ request.path }}">Benutzer</a></li>
+  </ul>
+</nav>
+{% endblock breadcrumb %}
+
+{% block body %}
+
+<h5>Benutzer</h5>
+
+<section class="grid split-grid">
+  <article class="hide-below-lg">
+    <hgroup>
+      <h6>Benutzerübersicht</h6>
+      <p>In dieser Übersicht sind System Bentzer einsehbar und veränderbar.</p>
+    </hgroup>
+  </article>
+  <div id="system-users-full-table">
+    {% include "users/includes/table.html" %}
+  </div>
+</section>
+
+
+{% endblock body %}

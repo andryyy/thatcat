@@ -1,0 +1,21 @@
+{% if not request.headers.get("Hx-Request") %}
+  {% extends "base.html" %}
+{% endif %}
+
+{% block breadcrumb %}
+<nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
+  <ul>
+    <li><span>Willkommen 👋</span></li>
+    <li><a href="#" hx-target="#body-main" hx-get="{{ request.path }}">Anmelden oder registrieren</a></li>
+  </ul>
+</nav>
+{% endblock breadcrumb %}
+
+{% block body %}
+<article class="login-mask">
+  {% include "auth/includes/login/login.html" %}
+  {% with hidden=True %}
+    {% include "auth/includes/register/register.html" %}
+  {% endwith %}
+</article>
+{% endblock body %}

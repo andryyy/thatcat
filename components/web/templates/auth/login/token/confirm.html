@@ -1,0 +1,21 @@
+<form data-loading-disable hx-trigger="submit throttle:1s" hx-post="/auth/login/token/verify">
+  <input type="hidden" name="token" value="{{ token }}">
+  <p>
+    Ein Ticket steht zur Bestätigung durch einen Administrator bereit: <code>{{ token }}</code>
+  </p>
+  <fieldset>
+    <label for="confirmation_code">Gebe den vom Administrator erhaltenen Code ein</label>
+    <input type="text" id="confirmation_code" name="confirmation_code"
+      pattern="[0-9]*"
+      autocomplete="off"
+      autocorrect="off"
+      autocapitalize="off"
+      spellcheck="false"
+      required>
+    <button type="submit"
+      hx-target="this"
+      hx-swap="innerHTML">
+        Überprüfen
+    </button>
+  </fieldset>
+</form>

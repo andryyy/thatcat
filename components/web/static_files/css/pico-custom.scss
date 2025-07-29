@@ -1,0 +1,560 @@
+@use "pico" with (
+  $enable-semantic-container: true,
+  $enable-responsive-spacings: true,
+  $enable-responsive-typography: false,
+  $theme-color: "grey",
+  $breakpoints: (
+    sm: (breakpoint: 576px, viewport: 95%),
+    md: (breakpoint: 768px, viewport: 95%),
+    lg: (breakpoint: 1024px, viewport: 90%),
+    xl: (breakpoint: 1280px, viewport: 90%),
+    xxl: (breakpoint: 1536px, viewport: 85%)
+  ),
+);
+@use "colors" as *;
+@use "sass:map";
+@use "settings" as *;
+@use "sass:math";
+
+@font-face {
+    font-family: go;
+    src: local("Go Regular"), url(../fonts/Go-Regular.woff2) format("woff2");
+    font-style: normal;
+    font-weight: 400;
+}
+@font-face {
+    font-family: go;
+    src: local("Go Italic"), url(../fonts/Go-Italic.woff2) format("woff2");
+    font-style: italic;
+    font-weight: 400;
+}
+@font-face {
+    font-family: go medium;
+    src: local("Go Medium"), url(../fonts/Go-Medium.woff2) format("woff2");
+    font-style: normal;
+    font-weight: 500;
+}
+@font-face {
+    font-family: go medium;
+    src: local("Go Medium Italic"), url(../fonts/Go-Medium-Italic.woff2) format("woff2");
+    font-style: italic;
+    font-weight: 500;
+}
+@font-face {
+    font-family: go;
+    src: local("Go Bold"), url(../fonts/Go-Bold.woff2) format("woff2");
+    font-style: normal;
+    font-weight: 600;
+}
+@font-face {
+    font-family: go;
+    src: local("Go Bold Italic"), url(../fonts/Go-Bold-Italic.woff2) format("woff2");
+    font-style: italic;
+    font-weight: 600;
+}
+@font-face {
+    font-family: go smallcaps;
+    src: local("Go Smallcaps"), url(../fonts/Go-Smallcaps.woff2) format("woff2");
+    font-style: normal;
+    font-weight: 400;
+}
+@font-face {
+    font-family: go smallcaps;
+    src: local("Go Smallcaps Italic"), url(../fonts/Go-Smallcaps-Italic.woff2) format("woff2");
+    font-style: italic;
+    font-weight: 400;
+}
+@font-face {
+    font-family: go mono;
+    src: local("Go Mono"), url(../fonts/Go-Mono.woff2) format("woff2");
+    font-style: normal;
+    font-weight: 400;
+}
+@font-face {
+    font-family: go mono;
+    src: local("Go Mono Italic"), url(../fonts/Go-Mono-Italic.woff2) format("woff2");
+    font-style: italic;
+    font-weight: 400;
+}
+@font-face {
+    font-family: go mono;
+    src: local("Go Mono Bold"), url(../fonts/Go-Mono-Bold.woff2) format("woff2");
+    font-style: normal;
+    font-weight: 600;
+}
+@font-face {
+    font-family: go mono;
+    src: local("Go Mono Bold Italic"), url(../fonts/Go-Mono-Bold-Italic.woff2) format("woff2");
+    font-style: italic;
+    font-weight: 600;
+}
+
+:root {
+  --pico-font-family-sans-serif: "Go", system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, var(--pico-font-family-emoji);
+  --pico-form-element-spacing-vertical: .5rem;
+  --pico-form-element-spacing-horizontal: .5rem;
+  --pico-border-radius: 0;
+  --pico-font-size: 12pt;
+  --pico-line-height: 1.4;
+}
+
+$sm-breakpoint: map-get(map-get($breakpoints, sm), breakpoint);
+$md-breakpoint: map-get(map-get($breakpoints, md), breakpoint);
+$lg-breakpoint: map-get(map-get($breakpoints, lg), breakpoint);
+$xl-breakpoint: map-get(map-get($breakpoints, xl), breakpoint);
+$xxl-breakpoint: map-get(map-get($breakpoints, xxl), breakpoint);
+
+small {
+  font-size: .875rem;
+  color: var(--pico-muted-color);
+}
+
+mark {
+  margin-block: calc(var(--pico-spacing)/4);
+  display: inline-block;
+  border-radius: .25rem;
+}
+
+pre {
+  padding: calc(var(--pico-spacing)/2);
+}
+
+nav[aria-label="breadcrumb"] li:last-child {
+  overflow-wrap: anywhere;
+}
+
+nav[aria-label="breadcrumb"] span {
+  padding: var(--pico-nav-link-spacing-vertical) var(--pico-nav-link-spacing-horizontal);
+  margin-inline-start: calc(var(--pico-nav-link-spacing-horizontal) * -1);
+}
+
+#nav-theme-bulb {
+  cursor:pointer !important;
+  text-decoration: none;
+}
+
+.leaflet-marker-icon {
+  background: transparent;
+  border: none;
+}
+.leaflet-map > mark {
+  font-family: var(--pico-font-family-sans-serif);
+  font-size: var(--pico-font-size);
+  margin: var(--pico-spacing);
+  z-index: 9999;
+  position: absolute;
+  bottom: 0;
+}
+.leaflet-map {
+  width: 100%;
+  max-height: 500px;
+  aspect-ratio: 1 / 1;
+  margin: var(--pico-spacing) 0;
+}
+.leaflet-control-zoom a {
+  --pico-border-color: none;
+  --pico-background-color: none;
+  padding: inherit !important;
+}
+
+.hidden {
+  display: none;
+}
+.dark {
+  filter: grayscale(100%);
+}
+
+table td article {
+  margin-bottom: var(--pico-spacing);
+}
+table tr {
+  white-space: nowrap;
+}
+table td.created-modified {
+  background-image: var(--pico-icon-date);
+  background-position: center right var(--pico-form-element-spacing-vertical);
+  background-size: 1rem;
+  padding-inline-end: 2rem;
+}
+table td.created-modified, table th.created-modified {
+  text-align: right;
+}
+
+.small-button,
+table td > a[role="button"],
+table td > button {
+  padding: calc(var(--pico-form-element-spacing-vertical) / 2) calc(var(--pico-form-element-spacing-horizontal) / 2);
+}
+
+.no-text-decoration {
+  text-decoration: none !important;
+  border-bottom: none !important;
+}
+
+.line-through {
+  text-decoration: line-through !important;
+}
+
+[data-loading] {
+  display: none;
+}
+
+.pointer {
+  cursor:pointer;
+}
+
+[contenteditable] {
+  display: inline-block;
+  border-bottom: 1px dotted #{$slate-300};
+  text-decoration: none;
+}
+[contenteditable]:focus {
+  padding: calc(var(--pico-spacing)/2);
+  background: var(--pico-contrast);
+  color: var(--pico-contrast-inverse);
+}
+
+[role="group"] {
+  --pico-group-box-shadow: none !important;
+}
+
+/*
+* Table navigation
+*/
+.table-navigation {
+  user-select: none;
+}
+.table-navigation .paging:not(.disabled) {
+  padding: var(--pico-form-element-spacing-vertical) var(--pico-form-element-spacing-horizontal);
+  color: var(--pico-color);
+}
+.table-navigation button.sorting {
+  font-size: .875rem;
+  border: 0;
+}
+.table-navigation div.filters {
+  white-space: wrap;
+}
+.table-navigation div.filter-buttons button {
+  font-size: 0.875rem;
+  padding: calc(var(--pico-form-element-spacing-vertical) / 2) calc(var(--pico-form-element-spacing-horizontal) / 2);
+  border-color: var(--pico-form-element-border-color);
+  --pico-border-radius: .5rem;
+}
+.table-navigation .paging.disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+/*
+# Notifications
+*/
+#notification-container {
+  position: fixed;
+  left: .25rem;
+  bottom: .25rem;
+  z-index: 999;
+  width: fit-content;
+}
+.notification:not(:last-child) {
+  margin-bottom: .25rem;
+}
+.notification-text {
+  white-space: pre-line;
+}
+.notification {
+  cursor: pointer;
+  padding: var(--pico-form-element-spacing-vertical) 2rem;
+  color: var(--pico-color);
+  background-color: var(--pico-background-color);
+  background-image: var(--pico-icon);
+  background-position: center left var(--pico-form-element-spacing-vertical);
+  background-size: calc(var(--pico-spacing) * 1.5);
+  background-blend-mode: color-burn;
+  padding-left: calc(var(--pico-form-element-spacing-vertical) * 2 + calc(var(--pico-spacing) * 1.5));
+}
+.notification-error {
+  --pico-background-color: #{$red-600};
+  --pico-icon: var(--pico-icon-invalid);
+  --pico-color: #{$red-50};
+}
+.notification-warning {
+  --pico-background-color: #{$yellow-50};
+  --pico-icon: var(--pico-icon-invalid);
+  --pico-color: #{$yellow-900};
+}
+.notification-success {
+  --pico-background-color: #{$green-550};
+  --pico-icon: var(--pico-icon-valid);
+  --pico-color: #{$slate-50};
+}
+.notification-user {
+  --pico-background-color: #{$azure-450};
+  --pico-icon: var(--pico-icon-chevron);
+  --pico-color: #{$slate-50};
+}
+.notification-title {
+  font-weight: bold;
+}
+.notification-system > .notification-title:before {
+  content:"\1F4E2\0020 Broadcast:\0020";
+}
+.notification-system {
+  --pico-background-color: #{$fuchsia-800};
+  --pico-icon: var(--pico-icon-chevron);
+  --pico-color: #{$fuchsia-100};
+}
+
+article.login-mask  {
+  padding: calc(var(--pico-spacing)*2);
+  border-radius: 1.5rem;
+}
+
+thead th, thead td, tfoot th, tfoot td {
+  --pico-font-weight: 400;
+}
+
+button, a { touch-action: manipulation; }
+
+button[type="submit"] {
+  width: auto;
+}
+
+dialog article {
+  max-width: 65%;
+}
+
+.no-text-wrap {
+  text-wrap: nowrap;
+  white-space: nowrap;
+}
+.text-wrap {
+  text-wrap: balance;
+  white-space: break-spaces;
+}
+
+.grid.split-grid > * {
+  grid-column: span 3;
+}
+.grid.split-grid > *:first-child {
+  grid-column: span 1;
+}
+.grid-center {
+  display: grid;
+  place-items: center
+}
+.grid-end {
+  display: grid;
+  justify-content: end;
+  grid-auto-columns: max-content;
+  grid-auto-flow: column;
+  gap: calc(var(--pico-spacing)/2);
+  align-items: center;
+}
+.grid-space-between {
+  display: grid;
+  justify-content: space-between;
+  grid-auto-columns: auto;
+  grid-auto-flow: column;
+  gap: calc(var(--pico-spacing)/2);
+  align-items: center;
+  margin: calc(var(--pico-spacing) /2) auto;
+}
+.grid-auto-cols {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  margin-bottom: var(--pico-spacing);
+  gap: calc(var(--pico-spacing)/2);
+}
+.grid-auto-cols .grid-span-all {
+  grid-column: 1 / -1;
+}
+.grid-auto-cols > article {
+  margin-bottom: 0;
+}
+
+.table-select {
+  background-color: rgb(128 128 128 / 10%);
+  backdrop-filter: blur(1px);
+  position: sticky;
+  bottom: var(--pico-form-element-spacing-vertical);
+  padding: var(--pico-form-element-spacing-vertical) var(--pico-form-element-spacing-horizontal);
+}
+
+nav details.dropdown {
+  width: max-content;
+}
+
+:not(header) > details:not(.dropdown) > summary {
+  color: #{$blue-500} !important;
+}
+
+article.user-group {
+  background-color: var(--pico-form-element-background-color);
+}
+
+hgroup ol, hgroup ul {
+  margin-block: calc(var(--pico-spacing)/2);
+}
+
+@media (max-width: $xxl-breakpoint) {
+  .grid-auto-cols {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: calc(var(--pico-spacing)/2);
+  }
+}
+@media (max-width: $xl-breakpoint) {
+  .grid-auto-cols {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: calc(var(--pico-spacing)/2);
+  }
+}
+@media (max-width: $lg-breakpoint) {
+  .grid-auto-cols {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: calc(var(--pico-spacing)/2);
+  }
+  th, td {
+    --pico-spacing: 0.75rem;
+  }
+}
+@media only screen and (max-width: $sm-breakpoint) {
+  :root {
+    --pico-font-size: 12pt;
+  }
+  #notification-container {
+    left: 0;
+    bottom: 0;
+    width: 100%;
+  }
+  dialog article {
+    max-width: 95%;
+  }
+  .grid-auto-cols {
+    display: grid;
+    grid-template-columns: repeat(1, 1fr);
+    gap: calc(var(--pico-spacing)/2);
+  }
+}
+
+.user-group {
+  opacity: 0;
+}
+
+textarea.dns-data {
+  border: 0;
+  background: transparent;
+  font-family: monospace;
+}
+
+fieldset.system-field label:before {
+  content:"\1f512\0020";
+}
+
+[data-field-type="location"],
+[data-field-type="tresor"] {
+  padding: var(--pico-spacing);
+  border: 0.25rem dashed var(--pico-blockquote-border-color);
+}
+
+button#menu-vault-dialog-toggle {
+  padding: calc(var(--pico-form-element-spacing-vertical) / 1.5) calc(var(--pico-form-element-spacing-horizontal) / 1.5);
+  border-color: var(--pico-form-element-border-color);
+  --pico-border-radius: .5rem;
+}
+
+///////////////////////////////////////
+// Generators for colors and breakpoints
+///////////////////////////////////////
+
+@function get-luminance($color) {
+  $red: math.div(red($color), 255);
+  $green: math.div(green($color), 255);
+  $blue: math.div(blue($color), 255);
+
+  @return ($red * 0.2126) + ($green * 0.7152) + ($blue * 0.0722);
+}
+
+@function get-contrast-ratio($color1, $color2) {
+  $l1: get-luminance($color1);
+  $l2: get-luminance($color2);
+
+  @if $l1 > $l2 {
+    @return math.div($l1, $l2);
+  } @else {
+    @return math.div($l2, $l1);
+  }
+}
+
+@function get-contrast-color($color) {
+  $dark-color: $grey-900;
+  $light-color: $slate-100;
+  $contrast-with-dark: get-contrast-ratio($color, $dark-color);
+  $contrast-with-light: get-contrast-ratio($color, $light-color);
+
+  @if $contrast-with-light >= 2.0 {
+    @return $light-color;
+  } @else {
+    @return $dark-color;
+  }
+}
+
+@each $color-key, $color-var in $colors {
+  @each $shade, $value in $color-var {
+    .color-#{$color-key}-#{$shade} {
+      color: $value !important;
+    }
+
+    // Default filled button
+    :is(button, [type="submit"], [type="button"], [role="button"]).button-#{$color-key}-#{$shade},
+    [type="reset"].button-#{$color-key}-#{$shade} {
+      color: get-contrast-color($value);
+      border-color: $value;
+      background-color: $value;
+    }
+
+    // Outline version — overrides background and text color
+    :is(button, [type="submit"], [type="button"], [role="button"]).button-#{$color-key}-#{$shade}.outline,
+    [type="reset"].button-#{$color-key}-#{$shade}.outline {
+      background-color: transparent;
+      color: $value;
+    }
+
+    :is(a).color-#{$color-key}-#{$shade} {
+      text-decoration-color: $value !important;
+    }
+  }
+
+  @if map-has-key($color-var, 500) {
+    .color-#{$color-key} {
+      @extend .color-#{$color-key}-500;
+    }
+
+    :is(button, [type="submit"], [type="button"], [role="button"]).button-#{$color-key},
+    [type="reset"].button-#{$color-key} {
+      @extend .button-#{$color-key}-500;
+    }
+  }
+}
+
+
+@each $size, $data in $breakpoints {
+  $breakpoint: map-get($data, breakpoint);
+  @media (max-width: $breakpoint) {
+    .hide-below-#{$size} {
+      display: none;
+    }
+    .show-below-#{$size} {
+      display: block;
+    }
+  }
+  @media (min-width: $breakpoint + 1px) {
+    .show-below-#{$size} {
+      display: none;
+    }
+  }
+}
+

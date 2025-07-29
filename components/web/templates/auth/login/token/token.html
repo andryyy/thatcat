@@ -1,0 +1,18 @@
+<form data-loading-disable hx-trigger="submit throttle:1s" hx-target="this" hx-swap="outerHTML" hx-post="/auth/login/token" hx-push-url="false">
+  <fieldset>
+    <label for="token-login">Wer meldet sich an?</label>
+    <input type="text" id="token-login" name="login"
+      autocorrect="off"
+      autocapitalize="off"
+      spellcheck="false"
+      required>
+    <small>Du erhälst im nächsten Schritt ein Ticket zur Anmeldung</small>
+  </fieldset>
+  <fieldset>
+    <button type="submit">Weiter</button>
+  </fieldset>
+  <hr>
+  <a href="#" hx-target="#login-form" hx-select="#login-form" hx-get="/">
+    Zurück zur Passkey Authentifizierung.
+  </a>
+</form>

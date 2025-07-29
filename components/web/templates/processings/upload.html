@@ -1,0 +1,70 @@
+{% if not request.headers.get("Hx-Request") %}
+  {% extends "base.html" %}
+{% endif %}
+
+{% block breadcrumb %}
+<nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
+  <ul>
+    <li><span>Objects</span></li>
+    <li><a href="#" hx-target="#body-main" hx-get="/objects/cars">Cars</a></li>
+    <li><span>Automatische Erfassung</span></li>
+  </ul>
+</nav>
+{% endblock breadcrumb %}
+
+{% block body %}
+
+<h5>Fotos und Dateien importieren </h5>
+
+<section>
+  <article>
+    <p>Wähle ein oder mehrere Fotos aus, um mit dem Import fortzufahren.</p>
+    <form hx-target="#tasks"
+      hx-swap="innerHTML"
+      hx-encoding="multipart/form-data"
+      hx-post="/processings/upload/process"
+      _="on htmx:xhr:progress(loaded, total) from me set #progress.value to (loaded/total)*100">
+      <fieldset data-loading-disable>
+        <label>Ein Foto erfassen</label>
+        {% set ua = request.headers.get("User-Agent", "")|lower  %}
+        {% if "firefox" in ua and "android" in ua %}
+        <input type="file" multiple name="images">
+        {% else %}
+        <input type="file" multiple accept="image/*" capture="environment" name="images">
+        {% endif %}
+      </fieldset>
+
+      <fieldset data-loading-disable>
+        <label>Eine sonstige Datei erfassen</label>
+        <input type="file" multiple accept=".xlsx, .xls, .csv, .txt" name="files">
+      </fieldset>
+
+      <fieldset data-loading-disable>
+        <label>Eine URL erfassen (Google Sheets, etc. ...)</label>
+        <input type="text" name="urls">
+      </fieldset>
+
+      <button data-loading-disable type="submit">Hochladen</button>
+
+      <p _="on htmx:xhr:loadstart from closest <form/>
+        remove @hidden from me
+      end
+      on htmx:xhr:loadend from closest <form/> or htmx:xhr:abort from closest <form/>
+        add @hidden to me
+        set #progress.value to 0
+      end" hidden>
+        <progress id="progress" value="0" max="100"></progress>
+      </p>
+    </form>
+  </article>
+
+  <div id="tasks" hx-swap="innerHTML" hx-get="/processings/tasks" hx-trigger="load once">
+    <article aria-busy="true">Lade Aufgaben...</article>
+  </div>
+
+  <div id="processings" hx-swap="outerHTML" hx-get="/processings" hx-trigger="load once">
+    <article aria-busy="true">Lade Speicher...</article>
+  </div>
+</section>
+
+{% endblock body %}

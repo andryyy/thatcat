@@ -1,0 +1,27 @@
+{#
+  "hidden" is used to include both login and register forms in main.html while only showing either/or
+#}
+
+<div id="register-form" class="login-register" {{ "hidden" if hidden }}>
+  <form
+    hx-swap="outerHTML"
+    data-loading-disable
+    hx-trigger="submit throttle:1s"
+    hx-post="/auth/register/token">
+      <fieldset>
+      <label for="webauthn-register">Pick a username</label>
+      <input type="text" id="webauthn-register" name="login"
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off"
+        spellcheck="false"
+        required>
+      </fieldset>
+      <button type="submit">Next</button>
+      <hr>
+      <p>
+        A token will be generated and needs to be validated via <b>command line</b>:
+        <code class="pointer" hx-on:click="!window.s?s=this.textContent:null;navigator.clipboard.writeText(s);this.textContent='Copied';setTimeout(()=>{this.textContent=s}, 1000)">./ctrl -t</code>
+      </p>
+  </form>
+</div>

@@ -1,0 +1,88 @@
+<form
+  hx-trigger="submit throttle:200ms"
+  hx-patch="/users/{{ user.id }}">
+
+  <article>
+    <h6>General</h6>
+    <fieldset>
+      <label>Login</label>
+      <input name="login"
+        type="text"
+        value="{{ user.login }}"
+        required
+        hx-on:change="document.getElementById('login-{{ user.id }}').textContent=this.value">
+    </fieldset>
+  </article>
+
+  <article>
+    <fieldset>
+      <h6>ACL</h6>
+      {% for acl in USER_ACLS %}
+      <input
+        role="switch"
+        id="acl-{{- acl -}}-{{ user.id }}"
+        {% if session["id"] == user.id %}
+        hx-on:click="!this.checked?(confirm('You are logged in as this user. Removing access may result in a broken session.')?null:event.preventDefault()):null"
+        {% endif %}
+        name="acl"
+        value="{{ acl }}"
+        type="checkbox" {{ "checked" if acl in user.acl }}>
+      <label for="acl-{{- acl -}}-{{ user.id }}">{{ acl|capitalize }}</label>
+      {% endfor %}
+    </fieldset>
+  </article>
+
+  <article>
+    <h6>Passkeys</h6>
+    {% if not user.credentials %}
+    <i>No passkeys available</i>
+    {% endif %}
+    {% for credential in user.credentials %}
+    <fieldset>
+      {% if session["cred_id"] == credential.id|hex %}
+        <mark>in use</mark>
+      {% endif %}
+      <div _="install inlineHtmxRename()"
+      contenteditable
+      data-patch-parameter="friendly_name"
+      spellcheck="false"
+      hx-disinherit="*"
+      hx-patch="/users/{{ user.id }}/credential/{{ credential.id|hex }}"
+      hx-trigger="editContent">
+        {{- credential.friendly_name -}}
+      </div>
+      <div>
+        <a href="#" class="{{ "color-red" if not credential.active else "color-green"}}"
+          hx-patch="/users/{{ user.id }}/credential/{{ credential.id|hex }}"
+          hx-vals='js:{"active": {{ "true" if not credential.active else "false"}}}'
+          hx-params="active">{{ "Deaktiviert" if not credential.active else "Aktiviert"}}</a>
+        <a href="#" class="color-red"
+          hx-confirm="Delete passkey?"
+          _="install confirmButton"
+          hx-trigger="confirmedButton throttle:200ms"
+          hx-delete="/users/{{ user.id }}/credential/{{ credential.id|hex }}">Entfernen</a>
+      </div>
+      <small>Zuletzt eingeloggt:
+        {% if credential.last_login %}
+        <span class="" value="{{ credential.last_login }}" _="init set dt to my @value js(dt) return new Date(dt).toLocaleString() end then put result into me"></span>
+        {% else %}-
+        {% endif %}
+      </small>
+    </fieldset>
+    <hr>
+    {% endfor %}
+  </article>
+
+  <article>
+    <h6>Profile data</h6>
+    {% with
+      schema=schemas.user_profile,
+      current_data=user.profile,
+      root_key="profile"
+    %}
+      {% include "includes/form_builder.html" %}
+    {% endwith %}
+  </article>
+
+  <button data-loading-disable type="submit">Update</button>
+</form>
