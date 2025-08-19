@@ -1,14 +1,13 @@
-import components.system
 import json
-
-from components.utils.requests import async_request
-from components.models import Literal, validate_call
 
 
 async def google_vision_api(
     base64_image: str, feature_types: list = ["TEXT_DETECTION"]
 ):
-    settings = await components.system.get_system_settings()
+    from components.system import get_system_settings
+    from components.utils.requests import async_request
+
+    settings = await get_system_settings()
     if not settings.details.GOOGLE_VISION_API_KEY:
         raise Exception("No Google Vision API key found in settings")
 

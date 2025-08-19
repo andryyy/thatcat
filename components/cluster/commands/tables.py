@@ -10,18 +10,27 @@ from components.models.cluster import CritErrors
 from components.utils.cryptography import dict_digest_sha1
 
 
+_modified_tables = dict()
+
+
 class PatchTableCommand(CommandPlugin):
     name = "PATCHTABLE"
 
     async def handle(self, cluster: "Server", data: "IncomingData") -> str:
+        global _modified_tables
+
+        for k, v in _modified_tables.items():
+            if v == table and k != lock_id:
+                raise DocumentNotUpdated("Table is being modified by another lock")
+
         lock_id, table_w_hash, table_payload = data.payload.split(" ")
         table, table_digest = table_w_hash.split("@")
 
         async with TinyDB(**dbparams(lock_id)) as db:
-            if not lock_id in IN_MEMORY_DB["PATCHED_TABLES"]:
-                IN_MEMORY_DB["PATCHED_TABLES"][lock_id] = set()
+            if not lock_id in _modified_tables:
+                _modified_tables[lock_id] = set()
 
-            IN_MEMORY_DB["PATCHED_TABLES"][lock_id].add(table)
+            _modified_tables[lock_id].add(table)
 
             try:
                 table_data = {doc.doc_id: doc for doc in db.table(table).all()}
@@ -70,14 +79,15 @@ class FullTableCommand(CommandPlugin):
     name = "FULLTABLE"
 
     async def handle(self, cluster: "Server", data: "IncomingData") -> str:
+        global _modified_tables
         lock_id, table_w_hash, table_payload = data.payload.split(" ")
         table, table_digest = table_w_hash.split("@")
 
         async with TinyDB(**dbparams(lock_id)) as db:
-            if not lock_id in IN_MEMORY_DB["PATCHED_TABLES"]:
-                IN_MEMORY_DB["PATCHED_TABLES"][lock_id] = set()
+            if not lock_id in _modified_tables:
+                _modified_tables[lock_id] = set()
 
-            IN_MEMORY_DB["PATCHED_TABLES"][lock_id].add(table)
+            _modified_tables[lock_id].add(table)
 
             try:
                 insert_data = json.loads(base64.b64decode(table_payload))
@@ -98,20 +108,21 @@ class CommitTableCommand(CommandPlugin):
     name = "COMMIT"
 
     async def handle(self, cluster: "Server", data: "IncomingData") -> str:
+        global _modified_tables
         lock_id = data.payload
 
-        if not lock_id in IN_MEMORY_DB["PATCHED_TABLES"]:
+        if not lock_id in _modified_tables:
             return CritErrors.NOTHING_TO_COMMIT.response
 
         try:
-            commit_tables = IN_MEMORY_DB["PATCHED_TABLES"][lock_id]
-            del IN_MEMORY_DB["PATCHED_TABLES"][lock_id]
+            commit_tables = _modified_tables[lock_id]
+            del _modified_tables[lock_id]
 
             await dbcommit(commit_tables, lock_id)
 
             for table in commit_tables:
-                if table in IN_MEMORY_DB["CACHE"]["FORMS"].copy():
-                    IN_MEMORY_DB["CACHE"]["FORMS"].pop(table, {})
+                if table in STATE.query_cache.copy():
+                    STATE.query_cache.pop(table, None)
 
             return "ACK"
         except Exception as e:

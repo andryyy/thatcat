@@ -7,8 +7,9 @@ from .utils.utils import parse_form_to_dict, ws_htmx
 from .utils.notifications import trigger_notification, validation_error
 
 from components.cluster.exceptions import ClusterException
-from components.database import IN_MEMORY_DB
+from components.database import STATE
 from components.models import UUID, ValidationError
+from components.logs import logger
 from components.utils import deep_model_dump, ensure_list, merge_deep
 from components.utils.datetimes import ntime_utc_now
 from config import defaults
@@ -79,14 +80,19 @@ async def handle_cluster_error(error):
 @app.before_request
 async def before_request():
     request.form_parsed = {}
+    request.USER_LANG = (
+        session.get("lang")
+        or request.accept_languages.best_match(defaults.ACCEPT_LANGUAGES)
+        or "en"
+    )
 
-    if session.get("id") and session["id"] in IN_MEMORY_DB["PROMOTE_USERS"]:
-        IN_MEMORY_DB["PROMOTE_USERS"].discard(session["id"])
+    if session.get("id") and session["id"] in STATE.promote_users:
+        STATE.promote_users.discard(session["id"])
         user = await get(user_id=session["id"])
         if "system" not in user.acl:
             user.acl.append("system")
             session["acl"] = user.acl
-            IN_MEMORY_DB["SESSION_VALIDATED"].update({session["id"]: user.acl})
+            STATE.session_validated.update({session["id"]: user.acl})
 
     if request.method in ["POST", "PATCH", "PUT", "DELETE"]:
         await modifying_request_limiter.acquire()

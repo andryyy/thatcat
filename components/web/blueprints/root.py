@@ -1,4 +1,5 @@
 import asyncio
+import glob
 import json
 import os
 
@@ -8,6 +9,18 @@ from components.utils.osm import display_name_to_location
 from components.web.utils import *
 
 blueprint = Blueprint("main", __name__, url_prefix="/")
+HS_DIR = os.path.abspath("components/web/templates/_hs")
+
+
+@blueprint.before_request
+async def before_request():
+    global L
+    L = LANG[request.USER_LANG]
+
+
+@blueprint.context_processor
+async def load_languages():
+    return {"L": L}
 
 
 @blueprint.route("/")
@@ -17,6 +30,14 @@ async def root():
 
     session_clear()
     return await render_template("auth/authenticate.html")
+
+
+@blueprint.route("/_hs/<script_file>")
+async def hs_script(script_file: str):
+    script_path = os.path.abspath(os.path.join(HS_DIR, script_file))
+    if script_path.startswith(HS_DIR + os.sep) and os.path.isfile(script_path):
+        return await render_template(f"_hs/{script_file}")
+    return abort(404)
 
 
 @blueprint.route("/location/search/<q>")
@@ -31,7 +52,7 @@ async def location_lookup(q: str):
 @blueprint.route("/asset/<asset_id>")
 @acl("any")
 async def asset(asset_id: UUID | str):
-    if await request_asset(asset_id):
+    if await request_asset(cluster, asset_id):
         return await send_from_directory("assets/", asset_id)
     else:
         return "", 404
@@ -47,7 +68,7 @@ async def logout():
 @websocket_acl("any")
 async def ws():
     await websocket.send(
-        f'<span class="no-text-decoration" data-tooltip="Connected" id="ws-indicator" hx-swap-oob="outerHTML">🟢</span>'
+        f'<span class="no-text-decoration" data-tooltip="{L['Connected']}" id="ws-indicator" hx-swap-oob="outerHTML">🟢</span>'
     )
     data_dict = None
     while not current_app.stop_event.is_set():
@@ -56,13 +77,11 @@ async def ws():
                 data = await websocket.receive()
             data_dict = json.loads(data)
             if "path" in data_dict:
-                IN_MEMORY_DB["WS_CONNECTIONS"][session["login"]][
+                STATE.ws_connections[session["login"]][
                     websocket._get_current_object()
                 ] = {
                     "path": data_dict["path"],
                 }
-        except asyncio.CancelledError:
-            raise
         except TimeoutError:
             if not data_dict:
                 await websocket.close(1000)

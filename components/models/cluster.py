@@ -2,8 +2,7 @@ import asyncio
 
 from components.cluster.ssl import get_ssl_context
 from components.models import *
-from components.utils import ensure_unique_list
-from components.utils.datetimes import ntime_utc_now
+from components.utils import ensure_unique_list, ntime_utc_now
 from config import defaults
 from contextlib import closing
 

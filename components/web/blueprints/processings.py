@@ -9,6 +9,20 @@ from components.web.utils import *
 blueprint = Blueprint("processings", __name__, url_prefix="/processings")
 
 
+@blueprint.before_request
+async def before_request():
+    global L
+    L = LANG[request.USER_LANG]
+
+
+@blueprint.context_processor
+async def load_context():
+    return {
+        "QUEUED_USER_TASKS": STATE.queued_user_tasks.get(session["id"], []),
+        "L": L,
+    }
+
+
 @blueprint.route("/", methods=["GET"])
 @acl(["user"])
 @formoptions(["projects"])
@@ -55,7 +69,7 @@ async def finalize_processing():
 
     if processing_data.reason == "abort":
         for asset in processing_item["assets"]:
-            await remove_asset(asset["id"])
+            await remove_asset(cluster, asset["id"])
 
         return trigger_notification(
             level="success",
@@ -81,10 +95,8 @@ async def process_upload():
     image_files = files.getlist("images")
     data_files = files.getlist("files")
 
-    if not session["id"] in IN_MEMORY_DB["QUEUED_USER_TASKS"]:
-        IN_MEMORY_DB["QUEUED_USER_TASKS"][session["id"]] = set()
-
-    QUEUED_USER_TASKS = IN_MEMORY_DB["QUEUED_USER_TASKS"][session["id"]]
+    if not session["id"] in STATE.queued_user_tasks:
+        STATE.queued_user_tasks[session["id"]] = set()
 
     if not image_files and not data_files:
         return validation_error(
@@ -100,11 +112,16 @@ async def process_upload():
         if not file.content_type.startswith("image/"):
             continue
 
-        t = asyncio.create_task(components.processings.process_image(file))
-        QUEUED_USER_TASKS.add(t)
-        t.add_done_callback(QUEUED_USER_TASKS.discard)
+        image_bytes = file.read()
+        image_filename = file.filename
 
-    return await render_template("processings/tasks.html", tasks=QUEUED_USER_TASKS)
+        t = asyncio.create_task(
+            components.processings.process_image(image_bytes, image_filename)
+        )
+        STATE.queued_user_tasks[session["id"]].add(t)
+        t.add_done_callback(STATE.queued_user_tasks[session["id"]].discard)
+
+    return await render_template("processings/tasks.html")
 
 
 @blueprint.route("/upload")
@@ -116,9 +133,4 @@ async def upload():
 @blueprint.route("/tasks")
 @acl(["user"])
 async def tasks():
-    if not session["id"] in IN_MEMORY_DB["QUEUED_USER_TASKS"]:
-        IN_MEMORY_DB["QUEUED_USER_TASKS"][session["id"]] = set()
-
-    QUEUED_USER_TASKS = IN_MEMORY_DB["QUEUED_USER_TASKS"][session["id"]]
-
-    return await render_template("processings/tasks.html", tasks=QUEUED_USER_TASKS)
+    return await render_template("processings/tasks.html")

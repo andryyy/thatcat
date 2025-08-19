@@ -1,9 +1,12 @@
 import random
 import json
 from config.defaults import ACCEPT_LANGUAGES
-from components.utils import ensure_list, to_unique_sorted_str_list
-from components.utils.datetimes import ntime_utc_now, utc_now_as_str
-from webauthn.helpers.structs import AuthenticatorTransport
+from components.utils import (
+    ensure_list,
+    to_unique_sorted_str_list,
+    ntime_utc_now,
+    utc_now_as_str,
+)
 from components.models import *
 from components.models.objects import model_classes
 
@@ -20,7 +23,7 @@ class UsersPagination(BaseModel):
     elements: int = 0
 
 
-class Tresor(BaseModel):
+class Vault(BaseModel):
     public_key_pem: str
     wrapped_private_key: str
     iv: str
@@ -32,7 +35,7 @@ class TokenConfirmation(BaseModel):
     token: str = constr(strip_whitespace=True, min_length=14, max_length=14)
 
 
-class AuthToken(BaseModel):
+class Auth(BaseModel):
     login: str = constr(strip_whitespace=True, min_length=1)
 
     @computed_field
@@ -46,18 +49,13 @@ class AuthToken(BaseModel):
 
 
 class UserProfile(BaseModel):
-    @computed_field
-    @property
-    def _form_id(self) -> str:
-        return f"form-{str(uuid4())}"
+    _form_id: str = PrivateAttr(default=f"form-{str(uuid4())}")
 
-    model_config = ConfigDict(validate_assignment=True)
-
-    tresor: Tresor | dict = Field(
+    vault: Vault | dict = Field(
         default={},
         json_schema_extra={
-            "title": "🔐 Einen Tresor konfigurieren",
-            "type": "tresor",
+            "title": "Vault configuration",
+            "type": "vault",
             "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
         },
     )
@@ -65,7 +63,7 @@ class UserProfile(BaseModel):
     first_name: str | None = Field(
         default="",
         json_schema_extra={
-            "title": "Vorname",
+            "title": "First name",
             "type": "text",
             "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
         },
@@ -74,7 +72,7 @@ class UserProfile(BaseModel):
     last_name: str | None = Field(
         default="",
         json_schema_extra={
-            "title": "Nachname",
+            "title": "Last name",
             "type": "text",
             "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
         },
@@ -83,8 +81,8 @@ class UserProfile(BaseModel):
     email: str | None = Field(
         default="",
         json_schema_extra={
-            "title": "E-Mail Adresse",
-            "description": "Eine E-Mail Adresse ist optional",
+            "title": "Email address",
+            "description": "Optional email address",
             "type": "email",
             "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
         },
@@ -93,8 +91,8 @@ class UserProfile(BaseModel):
     access_tokens: list[constr(min_length=16) | None] | None = Field(
         default=None,
         json_schema_extra={
-            "title": "API Keys",
-            "description": "API Keys können zum maschinellen Zugriff auf das System verwendet werden",
+            "title": "API keys",
+            "description": "API keys can be used for programmatic access",
             "type": "list:text",
             "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
         },
@@ -103,8 +101,8 @@ class UserProfile(BaseModel):
     permit_auth_requests: bool | None = Field(
         default=True,
         json_schema_extra={
-            "title": "Login-Anfragen erlauben",
-            "description": "Andere Geräte können Login-Anfragen für einen schnellen Zugang stellen.",
+            "title": "Interactive sign-in requests",
+            "description": "Show a dialog on sign-in requests to signed in users to quickly confirm access",
             "type": "toggle",
             "input_extra": 'autocomplete="off"',
         },
@@ -115,26 +113,24 @@ class UserProfile(BaseModel):
 
 class Credential(BaseModel):
     id: Annotated[str, AfterValidator(lambda x: bytes.fromhex(x))] | bytes
-    public_key: Annotated[str, AfterValidator(lambda x: bytes.fromhex(x))] | bytes
+    public_key: str
     friendly_name: constr(strip_whitespace=True, min_length=1)
     last_login: str
     sign_count: int
-    transports: list[AuthenticatorTransport] | None = []
     active: bool
     updated: str
     created: str
 
-    @field_serializer("id", "public_key")
+    @field_serializer("id")
     def serialize_bytes_to_hex(self, v: bytes, _info):
         return v.hex() if isinstance(v, bytes) else v
 
 
 class CredentialAdd(BaseModel):
     id: Annotated[str, AfterValidator(lambda x: bytes.fromhex(x))] | bytes
-    public_key: Annotated[str, AfterValidator(lambda x: bytes.fromhex(x))] | bytes
+    public_key: str
     sign_count: int
     friendly_name: constr(strip_whitespace=True, min_length=1) = "New passkey"
-    transports: list[AuthenticatorTransport] | None = []
     active: bool = True
     last_login: str = ""
 
@@ -148,14 +144,12 @@ class CredentialAdd(BaseModel):
     def updated(self) -> str:
         return utc_now_as_str()
 
-    @field_serializer("id", "public_key")
+    @field_serializer("id")
     def serialize_bytes_to_hex(self, v: bytes, _info):
         return v.hex() if isinstance(v, bytes) else v
 
 
 class User(BaseModel):
-    model_config = ConfigDict(validate_assignment=True)
-
     id: Annotated[str, AfterValidator(lambda v: str(UUID(v)))]
     login: constr(strip_whitespace=True, min_length=1)
     credentials: list[Credential | CredentialAdd] = []
@@ -168,6 +162,7 @@ class User(BaseModel):
     profile: UserProfile
     created: str
     updated: str
+    active: bool
 
 
 class UserGroups(BaseModel):
@@ -188,10 +183,13 @@ class UserAdd(BaseModel):
     ] = ["user"]
     profile: UserProfile = UserProfile.model_validate({})
     groups: list[constr(strip_whitespace=True, min_length=1)] = []
+    active: bool = False
+    id: str | None = None
 
-    @computed_field
-    @cached_property
-    def id(self) -> str:
+    @field_validator("id")
+    def id_validator(cls, v):
+        if v:
+            return str(UUID(v))
         return str(uuid4())
 
     @computed_field
@@ -212,6 +210,7 @@ class UserPatch(BaseModel):
         AfterValidator(lambda v: ensure_list(v)),
     ] = []
     groups: str | list | None = None
+    active: bool | None = None
 
     @computed_field
     @property
@@ -223,8 +222,10 @@ class UserProfilePatch(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     email: str | None = None
-    tresor: Json[Tresor] | Literal[""] | None = None
-    access_tokens: constr(min_length=16) | list[constr(min_length=16)] | None = None
+    vault: Json | Vault | None = None
+    access_tokens: constr(min_length=16) | Literal[""] | list[
+        constr(min_length=16) | None
+    ] | None = None
     permit_auth_requests: bool | None = None
 
     @field_validator("email", mode="before")
@@ -241,21 +242,18 @@ class UserProfilePatch(BaseModel):
             )
         return email
 
-    @field_validator("tresor")
-    def tresor_validator(cls, v):
-        if v is not None:
-            if v == "":
-                return {}
+    @field_validator("vault")
+    def vault_validator(cls, v):
+        if isinstance(v, Vault) or v == {}:
+            return v
+        if isinstance(v, dict):
+            return Vault.model_validate(v)
         return v
 
     @field_validator("access_tokens")
     def access_tokens_validator(cls, v):
         if v is not None:
             return list(set(ensure_list(v)))
-        return v
-
-    @field_validator("permit_auth_requests", mode="before")
-    def permit_auth_requests_validator(cls, v):
         return v
 
     @computed_field

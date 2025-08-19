@@ -15,6 +15,7 @@ from pydantic import (
     Json,
     model_serializer,
     model_validator,
+    PrivateAttr,
     TypeAdapter,
     validate_call,
     ValidationError,

@@ -6,11 +6,18 @@ from components.web.utils import *
 blueprint = Blueprint("groups", __name__, url_prefix="/groups")
 
 
+@blueprint.before_request
+async def before_request():
+    global L
+    L = LANG[request.USER_LANG]
+
+
 @blueprint.context_processor
 def load_context():
-    context = dict()
-    context["schemas"] = {"user_profile": UserProfile.model_json_schema()}
-    return context
+    return {
+        "user_profile": UserProfile.model_json_schema(),
+        "L": L,
+    }
 
 
 @blueprint.route("/", methods=["PATCH"])
@@ -47,4 +54,4 @@ async def user_group():
 @acl("system")
 @formoptions(["users"])
 async def get_groups():
-    return await render_template("groups/groups.html", data={})
+    return await render_template("groups/groups.html")

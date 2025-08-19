@@ -1,16 +1,17 @@
 import json
 from config.defaults import OSM_EMAIL, HOSTNAME
-from components.database import IN_MEMORY_DB
+from components.database import STATE
 from components.models.coords import Literal, Location, validate_call
-from components.utils.requests import async_request
 
 
 @validate_call
 async def coords_to_display_name(coords: str):
+    from components.utils.requests import async_request
+
     location = Location.from_coords(coords)
 
-    if IN_MEMORY_DB["CACHE"]["LOCATIONS"].get(location.coords):
-        return IN_MEMORY_DB["CACHE"]["LOCATIONS"][location.coords]
+    if STATE.locations.get(location.coords):
+        return STATE.locations[location.coords]
     else:
         try:
             status_code, response_text = await async_request(
@@ -23,9 +24,7 @@ async def coords_to_display_name(coords: str):
             )
             if status_code == 200:
                 response_text = json.loads(response_text)
-                IN_MEMORY_DB["CACHE"]["LOCATIONS"][location.coords] = response_text[
-                    "display_name"
-                ]
+                STATE.locations[location.coords] = response_text["display_name"]
                 return response_text["display_name"]
         except:
             return None
@@ -33,8 +32,10 @@ async def coords_to_display_name(coords: str):
 
 @validate_call
 async def display_name_to_location(q: str):
-    if q in IN_MEMORY_DB["CACHE"]["LOCATIONS"]:
-        return IN_MEMORY_DB["CACHE"]["LOCATIONS"][q]
+    from components.utils.requests import async_request
+
+    if q in STATE.locations:
+        return STATE.locations[q]
     else:
         try:
             location = None
@@ -58,7 +59,7 @@ async def display_name_to_location(q: str):
                         display_name=result["display_name"],
                     )
 
-                IN_MEMORY_DB["CACHE"]["LOCATIONS"][q] = location
+                STATE.locations[q] = location
 
         finally:
             return location

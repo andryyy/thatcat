@@ -26,7 +26,7 @@ class Files:
                 await self.cluster.await_receivers(sent, raise_err=True)
 
         except Exception as e:
-            raise FileDelException(Exception)
+            raise FileDelException(e)
 
     @validate_call
     async def fileget(
@@ -79,7 +79,7 @@ class Files:
                 f.write(payload)
 
         except Exception as e:
-            raise FileGetException(Exception)
+            raise FileGetException(e)
 
     @validate_call
     async def fileput(
@@ -104,4 +104,4 @@ class Files:
                 await self.cluster.await_receivers(sent, raise_err=True)
 
         except Exception as e:
-            raise FilePutException(Exception)
+            raise FilePutException(e)

@@ -14,13 +14,21 @@ blueprint = Blueprint("system", __name__, url_prefix="/system")
 
 LOG_LOCK = asyncio.Lock()
 APP_LOGS_FULL_PULL = dict()
+APP_LOGS_LAST_REFRESH = None
+
+
+@blueprint.before_request
+async def before_request():
+    global L
+    L = LANG[request.USER_LANG]
 
 
 @blueprint.context_processor
 def load_context():
-    context = dict()
-    context["schemas"] = {"system_settings": SystemSettings.model_json_schema()}
-
+    return {
+        "schemas": {"system_settings": SystemSettings.model_json_schema()},
+        "L": L,
+    }
     return context
 
 
@@ -188,15 +196,15 @@ async def refresh_cluster_logs():
         "/system/logs",
     )
 
-    if not IN_MEMORY_DB.get("application_logs_refresh") or request.args.get("force"):
-        IN_MEMORY_DB["application_logs_refresh"] = ntime_utc_now()
-
-        current_app.add_background_task(
-            expire_key,
-            IN_MEMORY_DB,
-            "application_logs_refresh",
-            defaults.CLUSTER_LOGS_REFRESH_AFTER,
+    if (
+        not APP_LOGS_LAST_REFRESH
+        or request.args.get("force")
+        or (
+            round(ntime_utc_now() - APP_LOGS_LAST_REFRESH)
+            >= defaults.CLUSTER_LOGS_REFRESH_AFTER
         )
+    ):
+        APP_LOGS_LAST_REFRESH = ntime_utc_now()
 
         async with LOG_LOCK:
             async with ClusterLock("files"):
@@ -240,7 +248,7 @@ async def refresh_cluster_logs():
                     "/system/logs",
                 )
 
-    refresh_ago = round(ntime_utc_now() - IN_MEMORY_DB["application_logs_refresh"])
+    refresh_ago = round(ntime_utc_now() - APP_LOGS_LAST_REFRESH)
 
     await ws_htmx(
         session["login"],

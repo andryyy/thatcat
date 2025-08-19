@@ -1,6 +1,6 @@
 import components.users
 
-from components.models.users import UserProfile, USER_ACLS
+from components.models.users import USER_ACLS, UserProfile
 from components.utils import batch, ensure_list
 from components.web.utils import *
 
@@ -8,11 +8,24 @@ from components.web.utils import *
 blueprint = Blueprint("users", __name__, url_prefix="/users")
 
 
+@blueprint.before_request
+async def before_request():
+    global L
+    request.USER_LANG = (
+        session.get("lang")
+        or request.accept_languages.best_match(defaults.ACCEPT_LANGUAGES)
+        or "en"
+    )
+    L = LANG[request.USER_LANG]
+
+
 @blueprint.context_processor
 def load_context():
-    context = {"schemas": {"user_profile": UserProfile.model_json_schema()}}
-    context["USER_ACLS"] = USER_ACLS
-    return context
+    return {
+        "schemas": {"user_profile": UserProfile.model_json_schema()},
+        "USER_ACLS": USER_ACLS,
+        "L": LANG[request.USER_LANG],
+    }
 
 
 @blueprint.route("/<user_id>")
@@ -129,7 +142,7 @@ async def patch_user(user_id: str | None = None):
             user_id=user_id, data=request.form_parsed.get("profile", {})
         )
 
-    IN_MEMORY_DB["SESSION_VALIDATED"].pop(user_id, None)
+    STATE.session_validated.pop(user_id, None)
 
     return trigger_notification(
         level="success",

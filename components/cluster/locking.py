@@ -18,8 +18,8 @@ class ClusterLock:
         self.data_before = dict()
         self._ctx_vars = dict()
         for table in self.tables:
-            if table in IN_MEMORY_DB["CACHE"]["FORMS"].copy():
-                IN_MEMORY_DB["CACHE"]["FORMS"].pop(table, {})
+            if table in STATE.query_cache.copy():
+                STATE.query_cache.pop(table, None)
 
     @staticmethod
     def compare_tables(d1, d2):
@@ -45,7 +45,12 @@ class ClusterLock:
         }
 
     async def __aenter__(self):
-        self.leader_data = cluster.peers.remotes[cluster.peers.local.leader]
+        if cluster.peers.local.leader == cluster.peers.local.name:
+            self._leader_data_on_enter = cluster.peers.local
+        else:
+            self._leader_data_on_enter = cluster.peers.remotes[
+                cluster.peers.local.leader
+            ]
         lock_id = await cluster.acquire_lock(self.tables)
         self._ctx_vars[lock_id] = CTX_LOCK_ID.set(lock_id)
         self.db_params = dbparams()
@@ -117,10 +122,10 @@ class ClusterLock:
                                     table_json_bytes = json.dumps(
                                         table_data, sort_keys=True
                                     ).encode("utf-8")
-
                                     fulltable_data = base64.b64encode(
                                         table_json_bytes
                                     ).decode("utf-8")
+
                                     for peer in failed_peers:
                                         sent = await cluster.send_command(
                                             "FULLTABLE {lock} {table}@{digest} {data}".format(
@@ -129,11 +134,6 @@ class ClusterLock:
                                                 digest=self.data_before[t]["digest"],
                                                 data=fulltable_data,
                                             ),
-                                            peer,
-                                        )
-
-                                        sent = await cluster.send_command(
-                                            f"{apply_mode} {lock_id} {t}@{self.data_before[t]['digest']} {apply_data}",
                                             peer,
                                         )
                                         (
@@ -146,10 +146,13 @@ class ClusterLock:
                                     raise PatchException(response[peer])
 
                 if commit:
-                    if (
-                        not self.leader_data
-                        == cluster.peers.remotes[cluster.peers.local.leader]
-                    ):
+                    if cluster.peers.local.leader == cluster.peers.local.name:
+                        _leader_data_on_commit = cluster.peers.local
+                    else:
+                        _leader_data_on_commit = cluster.peers.remotes[
+                            cluster.peers.local.leader
+                        ]
+                    if not self._leader_data_on_enter == _leader_data_on_commit:
                         raise LockException("Leader changed while locked")
 
                     async with cluster.receiving:

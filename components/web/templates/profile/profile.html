@@ -5,7 +5,7 @@
 {% block breadcrumb %}
 <nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
   <ul>
-    <li><span>Profil</span></li>
+    <li><span>{{ L["Profile"] }}</span></li>
     <li><a href="#" hx-target="#body-main" hx-get="{{ request.path }}">{{ session["login"] }}</a></li>
   </ul>
 </nav>
@@ -13,10 +13,10 @@
 
 {% block body %}
 
-<h5>Persönliche Daten</h5>
+<h5>{{ L["My data"] }}</h5>
 
-<article hx-trigger="htmx:afterRequest[event.detail.successful==true] from:#profile-form" hx-select="#profile-form" hx-get="/profile/" hx-target="#profile-form">
-  <h6>Profil</h6>
+<article hx-trigger="htmx:afterRequest[event.detail.successful==true] from:#profile-form" hx-select="#profile-form" hx-get="/profile/" hx-target="#profile-form" hx-swap="outerHTML">
+  <h6>{{ L["Profile"] }}</h6>
   <form hx-trigger="submit throttle:1s" hx-patch="/profile/edit" id="profile-form">
     {% with
       schema=schemas.user_profile,
@@ -24,12 +24,12 @@
     %}
       {% include "includes/form_builder.html" %}
     {% endwith %}
-    <button data-loading-disable data-loading-aria-busy type="submit">Speichern</button>
+    <button data-loading-disable data-loading-aria-busy type="submit">{{ L["Save"] }}</button>
   </form>
 </article>
 
 <section>
-  <h6>Passkeys</h6>
+  <h6>{{ L["Passkeys"] }}</h6>
   <div class="grid-auto-cols">
     {% for credential in user.credentials|sort(attribute="friendly_name") %}
     <article id="profile-credential-{{ credential.id|hex }}">
@@ -43,7 +43,7 @@
           {{- credential.friendly_name -}}
         </div>
         {% if session["cred_id"] == credential.id|hex %}
-        <mark>Eingeloggt</mark>
+        <mark>{{ L["Signed in"] }}</mark>
         {% endif %}
       </div>
       <fieldset>
@@ -52,10 +52,10 @@
           hx-vals='js:{"active":document.getElementById("cred-toggle-{{ credential.id|hex }}").checked}'>
           <input id="cred-toggle-{{ credential.id|hex }}"
             type="checkbox"
-            role="switch" {{ "checked" if credential.active }} /> Passkey aktiviert
+            role="switch" {{ "checked" if credential.active }} /> {{ L["Passkey enabled"] }}
         </label>
       </fieldset>
-      <small>Last Login:
+      <small>{{ L["Last login"] }}:
         {% if credential.last_login %}
         <span class="" value="{{ credential.last_login }}" _="init set dt to my @value js(dt) return new Date(dt).toLocaleString() end then put result into me"></span>
         {% else %}-
@@ -64,19 +64,15 @@
       <hr>
       <a href="#" class="color-red"
         hx-confirm="Passkey wirklich entfernen?"
-        _="install confirmButton"
+        _="install confirmButton on htmx:afterRequest[event.detail.successful==true] remove #profile-credential-{{ credential.id|hex }} end"
         hx-trigger="confirmedButton throttle:200ms"
-        hx-delete="/users/{{ session.id }}/credential/{{ credential.id|hex }}">Entfernen</a>
+        hx-delete="/users/{{ session.id }}/credential/{{ credential.id|hex }}">{{ L["Remove"] }}</a>
     </article>
     {% endfor %}
   </section>
-  <button type="submit" hx-post="/auth/register/webauthn/options"
-    data-loading-disable
-    id="register"
-    hx-target="this"
-    hx-swap="innerHTML">
-      Passkey hinzufügen
-  </button>
+  <form _="install addPasskey(register: false)">
+    <button type="submit">{{ L["Add Passkey"] }}</button>
+  </form>
 </div>
 
 {% endblock body %}

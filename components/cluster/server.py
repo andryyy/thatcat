@@ -18,8 +18,7 @@ from components.models.cluster import (
     validate_call,
     ValidationError,
 )
-from components.utils import ensure_unique_list
-from components.utils.datetimes import ntime_utc_now
+from components.utils import ensure_unique_list, ntime_utc_now
 
 
 class Server:
@@ -173,7 +172,7 @@ class Server:
 
         if self.stop_event.is_set() and cmd != "BYE":
             logger.warning(
-                f"[→ NOT sending !BYE commands while shutting down [{ticket}]"
+                f"[→ NOT sending BYE commands while shutting down [{ticket}]"
             )
             return SendCommandReturn(ticket="", receivers=[])
 
@@ -394,11 +393,18 @@ class Server:
                 stop_event.set()
             finally:
                 logger.info("Starting cluster shutdown")
+
                 if self.peers.get_established():
-                    await self.send_command("BYE", "*")
+                    try:
+                        await self.send_command("BYE", "*")
+                    except ConnectionResetError:
+                        pass
+
                 for t in self.tasks.copy():
                     t.cancel()
+
                 results = await asyncio.gather(*self.tasks, return_exceptions=True)
+
                 if not all(
                     isinstance(e, asyncio.CancelledError) or e == None for e in results
                 ):

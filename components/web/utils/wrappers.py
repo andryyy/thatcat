@@ -3,7 +3,7 @@ import components.users
 
 from .notifications import trigger_notification
 from .quart import abort, redirect, request, session, url_for, websocket
-from components.database import IN_MEMORY_DB
+from components.database import STATE
 from components.logs import logger
 from components.models import TypeAdapter, ValidationError, Literal, validate_call, UUID
 from components.utils import ensure_list
@@ -46,16 +46,16 @@ async def verify_session(acl: str | list) -> None:
         raise AuthException("Unknown ACL")
 
     for acl in acls:
-        if session["id"] not in IN_MEMORY_DB["SESSION_VALIDATED"]:
+        if session["id"] not in STATE.session_validated:
             try:
                 user = await components.users.get(user_id=session["id"])
-                IN_MEMORY_DB["SESSION_VALIDATED"].update({session["id"]: user.acl})
+                STATE.session_validated.update({session["id"]: user.acl})
                 session["acl"] = user.acl
             except:
                 session_clear()
                 raise AuthException("User unknown")
 
-        if acl == "any" or acl in IN_MEMORY_DB["SESSION_VALIDATED"][session["id"]]:
+        if acl == "any" or acl in STATE.session_validated[session["id"]]:
             break
     else:
         raise AuthException("Access denied by ACL")
@@ -85,8 +85,7 @@ async def create_session_by_token(token):
         lang=request.accept_languages.best_match(defaults.ACCEPT_LANGUAGES) or "en",
         profile=user.profile,
     )
-
-    for k, v in user_session.dict().items():
+    for k, v in user_session.model_dump().items():
         session[k] = v
 
 
@@ -97,14 +96,14 @@ def websocket_acl(acl_type):
             try:
                 await verify_session(acl_type)
 
-                if not session["login"] in IN_MEMORY_DB["WS_CONNECTIONS"]:
-                    IN_MEMORY_DB["WS_CONNECTIONS"][session["login"]] = dict()
+                if not session["login"] in STATE.ws_connections:
+                    STATE.ws_connections[session["login"]] = dict()
 
                 if (
                     not websocket._get_current_object()
-                    in IN_MEMORY_DB["WS_CONNECTIONS"][session["login"]]
+                    in STATE.ws_connections[session["login"]]
                 ):
-                    IN_MEMORY_DB["WS_CONNECTIONS"][session["login"]][
+                    STATE.ws_connections[session["login"]][
                         websocket._get_current_object()
                     ] = dict()
 
@@ -113,9 +112,9 @@ def websocket_acl(acl_type):
                 abort(401)
             finally:
                 if "login" in session:
-                    for ws in IN_MEMORY_DB["WS_CONNECTIONS"].get(session["login"], {}):
+                    for ws in STATE.ws_connections.get(session["login"], {}):
                         if ws == websocket._get_current_object():
-                            del IN_MEMORY_DB["WS_CONNECTIONS"][session["login"]][ws]
+                            del STATE.ws_connections[session["login"]][ws]
                             break
 
         return wrapper
@@ -174,24 +173,26 @@ def formoptions(
                 if option == "users" and not "system" in session["acl"]:
                     continue
 
-                if not option in IN_MEMORY_DB["CACHE"]["FORMS"]:
-                    IN_MEMORY_DB["CACHE"]["FORMS"][option] = {}
-
                 if option == "users":
-                    if not IN_MEMORY_DB["CACHE"]["FORMS"][option]:
-                        IN_MEMORY_DB["CACHE"]["FORMS"][
-                            option
-                        ] = await components.users.form_options()
+                    results, pagination = await components.users.search(name="")
+                    request.form_options[option] = {
+                        UUID(result.id): {
+                            "name": result.login,
+                            "groups": result.groups,
+                        }
+                        for result in results
+                    }
 
                 elif option in components.objects.model_classes["types"]:
-                    if not IN_MEMORY_DB["CACHE"]["FORMS"][option]:
-                        IN_MEMORY_DB["CACHE"]["FORMS"][
-                            option
-                        ] = await components.objects.form_options(option)
-
-                request.form_options[option] = IN_MEMORY_DB["CACHE"]["FORMS"][
-                    option
-                ].copy()
+                    results, pagination = await components.objects.search(
+                        object_type=option,
+                        q="",
+                        session_context=("", ["system"]),
+                    )
+                    request.form_options[option] = {
+                        UUID(result.id): result.details.model_dump()
+                        for result in results
+                    }
 
                 for k, v in request.form_options[option].items():
                     if UUID(session["id"]) in v.get("assigned_users", []):

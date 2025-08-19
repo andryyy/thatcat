@@ -1,8 +1,7 @@
 from components.models import *
 from components.models.assets import Asset
 from components.models.coords import Location
-from components.utils import ensure_list
-from components.utils.datetimes import utc_now_as_str
+from components.utils import ensure_list, utc_now_as_str
 
 
 class CompleteProcessingRequest(BaseModel):

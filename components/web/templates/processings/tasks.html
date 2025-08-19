@@ -1,6 +1,6 @@
-{% if tasks %}
-  <p aria-busy="true" _="init set $tasks to {{ tasks|length }} wait 1s then fetch '/processings/tasks' put result into #tasks">
-    Verarbeite <b>{{ tasks|length }}</b> Dateien
+{% if QUEUED_USER_TASKS %}
+  <p aria-busy="true" _="init set $tasks to {{ QUEUED_USER_TASKS|length }} wait 1s then fetch '/processings/tasks' put result into #tasks">
+    Verarbeite <b>{{ QUEUED_USER_TASKS|length }}</b> Dateien
   </p>
 {% else %}
   <p _="init if $tasks set $tasks to 0 trigger reloadProcessings on #processings">✅ Keine Hintergrundaufgaben</p>

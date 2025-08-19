@@ -1,24 +1,36 @@
-<article
-  hx-get="/auth/login/request/check/{{ data.request_token }}"
+<div
+  hx-get="/auth/login/request/{{ data.request_token }}"
   hx-trigger="every 1s"
   hx-ext="ignore:loading-states">
-    <header>Authentication request</header>
-    <h6>How to proceed</h6>
-    <ol>
+    <h5 aria-busy="true">{{ L["Awaiting response"] }}...</h5>
+    <p>
       {% if data.request_issued_to_user %}
-      <li>A request was sent to logged in users matching that name.</li>
+      {{ L["A request was sent to active user sessions"] }}.<br />
+      {{ L["You may also share this link to confirm the login on another device"] }}:
+      {% else %}
+      {{ L["Share this link to confirm the login on another device"] }}:
       {% endif %}
-      <li>You may also use this link (click to copy):
-        <p>
-          <b class="pointer" hx-on:click="!window.s?s=this.textContent:null;navigator.clipboard.writeText(s);this.textContent='Copied 👍';setTimeout(()=>{this.textContent=s}, 1000)">
-            {{- request.origin }}/auth/login/request/confirm/{{ data.request_token -}}
-          </b>
-        </p>
-      </li>
-    </ol>
+    </p>
+    <p>
+      <b class="pointer" hx-on:click="!window.s?s=this.textContent:null;navigator.clipboard.writeText(s);this.textContent='{{ L["Copied"] }} 👍';setTimeout(()=>{this.textContent=s}, 1000)">
+        {{- request.origin }}/auth/login/request/confirm/{{ data.request_token -}}
+      </b> ({{ L["Click to copy"] }})
+    </p>
+    <br/>
     <footer>
-      <button _="on load call countdownSeconds(me, {{ AUTH_REQUEST_TIMEOUT }}) end"
+      <button
         hx-get="/"
-        hx-target="#body-main" hx-push-url="true" hx-confirm="Cancel process?">Cancel process</button>
+        hx-target="#body-main" hx-push-url="true" hx-confirm="{{ L["Cancel process"] }}?">
+          {{ L["Cancel process"] }}
+      </button>
+      <hr>
+      <progress value="0" max="{{ AUTH_REQUEST_TIMEOUT }}" _="init
+        set i to {{ AUTH_REQUEST_TIMEOUT }}
+        repeat while i
+          decrement i
+          set my value to {{ AUTH_REQUEST_TIMEOUT }} - i
+          wait 1s
+        end
+      end" />
     </footer>
-</article>
+</div>

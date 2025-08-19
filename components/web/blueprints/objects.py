@@ -8,17 +8,10 @@ from components.web.utils import *
 blueprint = Blueprint("objects", __name__, url_prefix="/objects")
 
 
-@blueprint.context_processor
-async def load_context():
-    context = dict()
-    context["schemas"] = model_classes["schemas"]
-    context["system_fields"] = model_classes["system_fields"]
-    context["object_types"] = model_classes["types"]
-    return context
-
-
 @blueprint.before_request
-async def objects_before_request():
+async def before_request():
+    global L
+    L = LANG[request.USER_LANG]
     if "object_type" in request.view_args:
         if request.view_args["object_type"] not in model_classes["types"]:
             if "Hx-Request" in request.headers:
@@ -28,6 +21,16 @@ async def objects_before_request():
                     title="Object type error",
                     message="Object type is unknown",
                 )
+
+
+@blueprint.context_processor
+async def load_context():
+    return {
+        "schemas": model_classes["schemas"],
+        "system_fields": model_classes["system_fields"],
+        "object_types": model_classes["types"],
+        "L": L,
+    }
 
 
 @blueprint.route("/")

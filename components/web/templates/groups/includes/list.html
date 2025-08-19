@@ -1,0 +1,110 @@
+{% set groups_dict = {} %}
+{% for user_id, user_data in request.form_options.users.items() %}
+    {% for group in user_data.groups %}
+        {% if group not in groups_dict %}
+            {% set _ = groups_dict.update({group: []}) %}
+        {% endif %}
+        {% if user_id|string not in groups_dict[group] %}
+            {% set _ = groups_dict[group].append(user_id|string) %}
+        {% endif %}
+    {% endfor %}
+{% endfor %}
+
+<section id="user-groups" class="grid-auto-cols"
+  _="
+  init
+    put '' into #user-groups
+    set $names to value of <#user-groups [name=name]/> as Array
+    {% for group, members in groups_dict.items() | sort  %}
+    log {{ members|safe }}
+    if $names does not contain '{{- group -}}'
+        append '{{- group -}}' to $names
+        render #group-template with (name: '{{- group -}}', members: {{ members|safe }})
+        put the result at the end of #user-groups
+        call htmx.process(#user-groups)
+        add @hidden to .no-user-groups
+        set .user-group's *opacity to 1
+    end
+    {% endfor %}
+  end
+  on htmx:afterRequest[event.detail.successful==true] queue all
+      set group to closest .user-group to event.target
+      set value of <[name=name]/> in group to value of <[name=new_name]/> in group
+      if <[name=members] option:checked/> in group is empty
+        add @hidden to group
+        settle
+        remove group
+        trigger deleteName
+      else
+        add @hidden to .user-group-unsaved in group
+      end
+  end
+  on change or keyup
+    remove @hidden from .user-group-unsaved in closest .user-group to event.target
+  end
+  on deleteName
+    set $names to value of <#user-groups [name=name]/> as Array
+  end">
+</section>
+
+<p>
+  <mark class="no-user-groups" >
+    There is no group assigned to any user.
+  </mark>
+</p>
+
+<template id="group-template">
+  @if members is not empty or newGroup
+    @set hidden to `hidden`
+  @end
+  <article class="user-group">
+    <form hx-patch="/groups">
+      <input type="hidden" name="name" value="${name}"/>
+      <fieldset data-loading-disable>
+        <label>Group name</label>
+        <input type="text" name="new_name" value="${name}">
+      </fieldset>
+      <fieldset>
+        <label>Members</label>
+        <select data-loading-disable
+          name="members"
+          multiple
+          class="user-select">
+          {% for user_id, user_data in request.form_options.users.items() %}
+          @if members contains "{{ user_id|string }}"
+            <option selected value="{{ user_id|string }}">{{ user_data.name }}</option>
+          @else
+            <option value="{{ user_id|string }}">{{ user_data.name }}</option>
+          @end
+          {% endfor %}
+        </select>
+      </fieldset>
+      @if newGroup
+        <small class="color-orange-400"
+        _="on change from closest <form/>
+          if <[name=members] option:checked/> in event.target is not empty
+            remove me
+          end">❗ New group, select members and save group to apply</small>
+      @end
+      <small class="color-yellow-200 user-group-unsaved" ${hidden}>⚠️ unsaved</small>
+      <div class="grid-space-between">
+        <a href="#" _="install confirmButton
+          on confirmedButton
+            set selectedIndex of <select/> in closest <form/> to -1
+            trigger submit on closest <form/>
+          end">Remove</a>
+        <button data-loading-disable _="on click
+          if (selectedIndex of <select/> in closest <form/>) < 0
+            trigger notification(level: 'validationError', message: 'Missing members', duration: 3000, locations: ['members'])
+            halt the event
+            exit
+          end"
+          class="button-green user-group-unsaved"
+          ${hidden}
+          type="submit">
+            Save
+        </button>
+      </div>
+    </form>
+  </article>
+</template>

@@ -14,27 +14,26 @@
       const theme = localStorage.getItem('theme') || 'light';
       document.documentElement.dataset.theme = theme;
     </script>
-    <script type="text/hyperscript" src="/static/hyperscript/common._hs"></script>
-    <script type="text/hyperscript" src="/static/hyperscript/leaflet._hs"></script>
-    <script type="text/hyperscript" src="/static/hyperscript/tresor._hs"></script>
+    <script type="text/hyperscript" src="/_hs/common._hs" defer></script>
+    <script type="text/hyperscript" src="/_hs/leaflet._hs" defer></script>
+    <script type="text/hyperscript" src="/_hs/vault._hs" defer></script>
     <script src="/static/js/leaflet/leaflet.js"></script>
     <script src="/static/js/htmx.org/htmx.org.js"></script>
     <script src="/static/js/htmx.org/htmx.org.loading-states.js" defer></script>
     <script src="/static/js/htmx.org/htmx.org.json-enc.js" defer></script>
     <script src="/static/js/htmx.org/htmx.org.ws.js" defer></script>
-    <script src="/static/js/_hyperscript/_hyperscript.js"></script>
-    <script src="/static/js/_hyperscript/_hyperscript.template.js"></script>
+    <script src="/static/js/_hs/_hyperscript.js"></script>
+    <script src="/static/js/_hs/_hyperscript.template.js"></script>
     <script src="/static/js/simplewebauthn-browser/simplewebauthn-browser.js"></script>
     <script defer src="/static/js/uservault.js"></script>
-    <script defer src="/static/js/site.js"></script>
   </head>
 
   <body _="install bodydefault" hx-ext="loading-states">
     <header hx-push-url="true">
     {% block menu %}
       {% include "includes/menu.html" %}
+      <hr>
     {% endblock %}
-    <hr>
     {% block breadcrumb %}
       <nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true"></nav>
     {% endblock %}

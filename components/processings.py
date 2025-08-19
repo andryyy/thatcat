@@ -1,6 +1,6 @@
 import asyncio
+
 from components.database import *
-from components.cluster.locking import ClusterLock
 from components.models.assets import Asset
 from components.models.coords import Location
 from components.models.processings import ValidationError, validate_call, UUID, uuid4
@@ -15,6 +15,8 @@ from components.utils.osm import coords_to_display_name
 from components.models.processings import CreateProcessingData
 from components.utils.vins import VinTool
 from components.web.utils.quart import current_app, session
+
+processing_limiter = asyncio.Semaphore(3)
 
 
 def session_context(fn):
@@ -54,57 +56,59 @@ async def all(session_context: tuple = ()):
         return db.table("processing").search(query)
 
 
-async def process_image(image_file):
-    image_bytes = image_file.read()
-    image_filename = image_file.filename
-    try:
-        image_exif = ImageExif(image_bytes)
-        image_coords = image_exif.coords
-        location = Location.from_coords(image_coords)
-        location.display_name = await coords_to_display_name(image_coords)
-    except (ValueError, ValidationError) as e:
-        location = None
-    except UnidentifiedImageError:
-        return
+async def process_image(image_bytes, image_filename):
+    from components.cluster import cluster
+    from components.cluster.locking import ClusterLock
 
-    try:
-        vins = await VinTool.extract_from_bytes(image_bytes) or [None]
-    except Exception as e:
-        vins = [None]
+    async with processing_limiter:
+        try:
+            image_exif = ImageExif(image_bytes)
+            image_coords = image_exif.coords
+            location = Location.from_coords(image_coords)
+            location.display_name = await coords_to_display_name(image_coords)
+        except (ValueError, ValidationError) as e:
+            location = None
+        except UnidentifiedImageError:
+            return
 
-    asset_id = str(uuid4())
+        try:
+            vins = await VinTool.extract_from_bytes(image_bytes) or [None]
+        except Exception as e:
+            vins = [None]
 
-    with open(f"assets/{asset_id}", "wb") as f:
-        f.write(image_bytes)
+        asset_id = str(uuid4())
 
-    convert_file_to_webp(f"assets/{asset_id}")
+        with open(f"assets/{asset_id}", "wb") as f:
+            f.write(image_bytes)
 
-    asset = Asset(
-        id=asset_id,
-        filename=image_filename,
-    )
+        convert_file_to_webp(f"assets/{asset_id}")
 
-    try:
-        await push_asset(asset_id)
-        async with ClusterLock("processing"):
-            async with TinyDB(**dbparams()) as db:
-                for vin in vins:
-                    create_processing = CreateProcessingData.model_validate(
-                        {
-                            "assets": [asset],
-                            "location": location,
-                            "vin": vin,
-                            "filename": asset.filename,
-                            "user": session["id"],
-                        }
-                    )
-                    db.table("processing").insert(
-                        create_processing.model_dump(mode="json")
-                    )
+        asset = Asset(
+            id=asset_id,
+            filename=image_filename,
+        )
 
-    except Exception as e:
-        logger.critical(e)
-        await remove_asset(asset_id)
+        try:
+            async with ClusterLock("processing"):
+                await push_asset(cluster, asset_id)
+                async with TinyDB(**dbparams()) as db:
+                    for vin in vins:
+                        create_processing = CreateProcessingData.model_validate(
+                            {
+                                "assets": [asset],
+                                "location": location,
+                                "vin": vin,
+                                "filename": asset.filename,
+                                "user": session["id"],
+                            }
+                        )
+                        db.table("processing").insert(
+                            create_processing.model_dump(mode="json")
+                        )
+
+        except Exception as e:
+            logger.critical(e)
+            await remove_asset(cluster, asset_id)
 
 
 @session_context

@@ -1,9 +1,7 @@
 from components.models import *
 from components.models.assets import Asset
 from components.models.coords import Location
-from components.utils import ensure_list
-from components.utils.datetimes import utc_now_as_str
-from components.utils.vins import VinTool
+from components.utils import ensure_list, utc_now_as_str, VinTool
 from quart.sessions import SecureCookieSession
 
 
@@ -17,10 +15,7 @@ class ObjectPagination(BaseModel):
 
 
 class ObjectProject(BaseModel):
-    @computed_field
-    @property
-    def _form_id(self) -> str:
-        return f"form-{str(uuid4())}"
+    _form_id: str = PrivateAttr(default=f"form-{str(uuid4())}")
 
     name: constr(min_length=1) = Field(
         json_schema_extra={
@@ -84,10 +79,7 @@ class ObjectProjectMinimal(ObjectProjectOptional):
 
 
 class ObjectCar(BaseModel):
-    @computed_field
-    @property
-    def _form_id(self) -> str:
-        return f"form-{str(uuid4())}"
+    _form_id: str = PrivateAttr(default=f"form-{str(uuid4())}")
 
     vin: str = Field(
         json_schema_extra={

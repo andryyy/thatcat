@@ -38,7 +38,7 @@ class CommandPlugin(ABC):
     @pre_dispatch
     async def dispatch(self, cluster: "Server", data: "IncomingData") -> None | str:
         async with self.timeit():
-            return await asyncio.shield(self.handle(cluster, data))
+            return await self.handle(cluster, data)
 
     @abstractmethod
     async def handle(self, cluster: "Server", data: "IncomingData") -> None | str:

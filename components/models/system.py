@@ -1,13 +1,9 @@
-from components.utils import ensure_list
-from components.utils.datetimes import utc_now_as_str
+from components.utils import ensure_list, utc_now_as_str
 from components.models import *
 
 
 class SystemSettings(BaseModel):
-    @computed_field
-    @property
-    def _form_id(self) -> str:
-        return f"form-{str(uuid4())}"
+    _form_id: str = PrivateAttr(default=f"form-{str(uuid4())}")
 
     GOOGLE_VISION_API_KEY: str = Field(
         default="",

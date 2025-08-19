@@ -5,17 +5,56 @@
 {% block breadcrumb %}
 <nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
   <ul>
-    <li><span>Willkommen 👋</span></li>
-    <li><a href="#" hx-target="#body-main" hx-get="{{ request.path }}">Anmelden oder registrieren</a></li>
+    <li><span>{{ L["Welcome"] }} 👋</span></li>
   </ul>
 </nav>
 {% endblock breadcrumb %}
 
 {% block body %}
 <article class="login-mask">
-  {% include "auth/includes/login/login.html" %}
-  {% with hidden=True %}
-    {% include "auth/includes/register/register.html" %}
-  {% endwith %}
+  <div id="login-form" class="login-register">
+    <form _="install login">
+      <fieldset>
+        <button type="submit"
+          autocomplete="username webauthn"
+          autocapitalize="none"
+          autocorrect="off"
+          autofocus="autofocus">🔑 {{ L["Sign in with passkey"] }}</button>
+      </fieldset>
+    </form>
+    <hr>
+    <details>
+      <summary>{{ L["Other options"] }}</summary>
+      <div hx-disinherit="*">
+        <ol>
+          <li>
+            <a href="#" class="no-text-decoration" hx-target="#login-form" hx-get="/auth/login/request" hx-push-url="false">
+              {{ L["Sign in using other device"] }}
+            </a>
+          </li>
+          <li>
+            <a href="#" class="no-text-decoration" hx-target="#login-form" hx-get="/auth/login/token" hx-push-url="false">
+              {{ L["Terminal confirmed sign-in token"] }}
+            </a>
+          </li>
+        </ol>
+      </div>
+    </details>
+  </div>
+  <div id="register-form" class="login-register" hidden>
+    <form _="install addPasskey(register: true)">
+        <fieldset>
+          <label for="webauthn-register">{{ L["Pick a username"] }}</label>
+          <input type="text" id="webauthn-register" name="login"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
+            required>
+        </fieldset>
+        <button type="submit">{{ L["Next"] }}</button>
+    </form>
+  </div>
+
 </article>
 {% endblock body %}

@@ -2,6 +2,7 @@ import asyncio
 import re
 
 from components.database import *
+from components.database import LRUCache
 from components.models.users import *
 from components.utils import batch, merge_models
 from components.web.utils.quart import current_app, session
@@ -23,10 +24,6 @@ def session_context(fn):
     return inner
 
 
-async def _populate_form_cache():
-    IN_MEMORY_DB["CACHE"]["FORMS"]["users"] = await form_options()
-
-
 @validate_call
 async def what_id(login: str):
     async with TinyDB(**dbparams()) as db:
@@ -42,17 +39,16 @@ async def what_id(login: str):
 @validate_call
 async def create(data: dict):
     create_user = UserAdd.model_validate(data)
+    insert_data = create_user.model_dump(mode="json")
 
     async with TinyDB(**dbparams()) as db:
-        if db.table("users").search(Q.login == create_user.login):
-            raise ValueError("name", "The provided login name exists")
-        insert_data = create_user.model_dump(mode="json")
+        if db.table("users").search(
+            (Q.login == insert_data["login"]) | (Q.id == insert_data["id"])
+        ):
+            raise ValueError("name", "The provided user exists")
         db.table("users").insert(insert_data)
 
-    t = asyncio.create_task(_populate_form_cache())
-    BACKGROUND_TASKS.add(t)
-    t.add_done_callback(BACKGROUND_TASKS.discard)
-
+    STATE.query_cache.pop("users", None)
     return insert_data["id"]
 
 
@@ -74,10 +70,7 @@ async def delete(user_id: UUID):
 
         db.table("users").remove(Q.id == str(user_id))
 
-    t = asyncio.create_task(_populate_form_cache())
-    BACKGROUND_TASKS.add(t)
-    t.add_done_callback(BACKGROUND_TASKS.discard)
-
+    STATE.query_cache.pop("users", None)
     return user.id
 
 
@@ -93,6 +86,7 @@ async def create_credential(user_id: UUID, data: dict):
             {"credentials": user.model_dump(mode="json")["credentials"]},
             Q.id == str(user_id),
         )
+        STATE.query_cache.pop("users", None)
         return credential.id
 
 
@@ -118,6 +112,7 @@ async def delete_credential(
             {"credentials": user.model_dump(mode="json")["credentials"]},
             Q.id == str(user_id),
         )
+        STATE.query_cache.pop("users", None)
         return hex_id
 
 
@@ -143,10 +138,7 @@ async def patch(user_id: UUID, data: dict):
             Q.id == str(user_id),
         )
 
-    t = asyncio.create_task(_populate_form_cache())
-    BACKGROUND_TASKS.add(t)
-    t.add_done_callback(BACKGROUND_TASKS.discard)
-
+    STATE.query_cache.pop("users", None)
     return user.id
 
 
@@ -164,6 +156,7 @@ async def patch_profile(user_id: UUID, data: dict):
             {"profile": patched_user_profile.model_dump(mode="json")},
             Q.id == str(user_id),
         )
+        STATE.query_cache.pop("users", None)
         return user_id
 
 
@@ -198,6 +191,7 @@ async def patch_credential(
             {"credentials": user.model_dump(mode="json")["credentials"]},
             Q.id == str(user_id),
         )
+        STATE.query_cache.pop("users", None)
         return hex_id
 
 
@@ -219,7 +213,13 @@ async def search(
             query &= Q[filter_key].one_of(ensure_list(filter_value))
 
     async with TinyDB(**dbparams()) as db:
+        table = db.table("users", cache_size=200)
+
+        if "users" in STATE.query_cache:
+            table._query_cache.update(STATE.query_cache["users"])
+
         matched_users = db.table("users").search(query)
+        STATE.query_cache["users"] = dict(table._query_cache)
 
     if pagination:
         pagination.elements = len(matched_users)

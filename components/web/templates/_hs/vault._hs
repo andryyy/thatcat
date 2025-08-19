@@ -1,0 +1,125 @@
+behavior vaultConfig(formId, isInit)
+  on keydown[keyCode == 13] from <input/> in me
+    halt the event
+    trigger click on <a/> in me
+  end
+
+  on click from #{'vault-apply-' + formId} in me
+    if not isInit
+      halt the event
+      remove @aria-invalid from <[aria-invalid]/> in me
+      if not value of #{'vault-password-' + formId}
+        add [@aria-invalid=true] to #{'vault-password-' + formId} throw '{{ L["Password missing"] }}'
+      end
+      if value of #{'vault-password-' + formId} != value of #{'vault-password2-' + formId}
+        add [@aria-invalid=true] to #{'vault-password2-' + formId} throw '{{ L["Password confirmation missing"] }}'
+      end
+      call VaultSetupUserCryptoAndSend(value of #{'vault-password-' + formId})
+      set value of #{formId} to (result as JSON)
+      call window.vault.lock()
+      trigger submit on closest <form/>
+    else
+      halt the event
+      remove @aria-invalid from <[aria-invalid]/> in me
+      if not value of #{'vault-password-' + formId}
+        add [@aria-invalid=true] to #{'vault-password-' + formId} throw '{{ L["Current password missing"] }}'
+      end
+      if not value of #{'vault-password-new-' + formId}
+        add [@aria-invalid=true] to #{'vault-password-new-' + formId} throw '{{ L["New password missing"] }}'
+      end
+      if value of #{'vault-password-new-' + formId} != value of #{'vault-password-new2-' + formId}
+        add [@aria-invalid=true] to #{'vault-password-new2-' + formId} throw '{{ L["Passwords do not match"] }}'
+      end
+      set previousLock to window.vault.isUnlocked()
+      call JSON.parse(value of #{formId}) set keyData to the result
+      call VaultChangePassword(value of #{'vault-password-' + formId}, value of #{'vault-password-new-' + formId}, keyData)
+      call window.vault.exportPayload()
+      set value of #{formId} to (result as JSON)
+      if not previousLock call window.vault.lock() end
+      trigger submit on closest <form/>
+    end
+  end
+
+  on exception(error)
+      trigger notification(level: 'error', title: '{{ L["Vault error"] }}', message: error, duration: 3000)
+  end
+end
+
+
+behavior vaultToggle
+  def setUnlocked
+    get #vault-unlock-pin
+      add @disabled to it
+    get #vault-unlock
+      set its textContent to '{{ L["Lock"] }}'
+      remove @disabled from it
+    set #vault-indicator's textContent to '{{ L["Unlocked"] }}'
+  end
+
+  def setLocked
+    get #vault-unlock-pin
+      remove @disabled from it
+    get #vault-unlock
+      set its textContent to '{{ L["Unlock"] }}'
+      remove @disabled from it
+    set #vault-indicator's textContent to '{{ L["Locked"] }}'
+  end
+
+  def novault
+    get #vault-unlock-pin
+      add @disabled to it
+    get #vault-unlock
+      add @disabled to it
+      set its textContent to '{{ L["Not available"] }}'
+    set #vault-indicator's textContent to '{{ L["Not available"] }} ⛔'
+  end
+
+  init
+    if window.vault.isUnlocked()
+      call setUnlocked()
+    else
+      if #vault-unlock's @data-vault != "{}"
+        call setLocked()
+      else
+        call novault()
+      end
+    end
+  end
+
+  on profileUpdate from body
+    exit unless #vault-unlock's @data-vault == "{}"
+    if event.detail.vault
+      set #vault-unlock's @data-vault to (event.detail.vault as JSON)
+      call setLocked()
+    end
+  end
+
+  on keydown[keyCode == 13] from #vault-unlock-pin
+    trigger click on #vault-unlock unless #vault-unlock-pin's value is empty
+  end
+
+  on click from #vault-unlock
+    halt the event
+    if not window.vault.isUnlocked()
+      throw '{{ L["Password missing"] }}' unless value of #vault-unlock-pin
+      call JSON.parse(#vault-unlock's @data-vault) set keyData to the result
+      call VaultUnlockPrivateKey(value of #vault-unlock-pin, keyData)
+      call setUnlocked()
+    else
+      call window.vault.lock()
+      call setLocked()
+    end
+    set value of #vault-unlock-pin to ''
+    remove @open from closest <dialog/>
+  end
+
+  on exception(error)
+    trigger notification(
+      title: '{{ L["vault error"] }}',
+      level: 'validationError',
+      message: '{{ L["Could not unlock vault, check your password"] }}',
+      duration: 5000,
+      locations: ['menu-vault-unlock-pin']
+    )
+  end
+end

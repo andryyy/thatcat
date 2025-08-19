@@ -1,10 +1,11 @@
+<progress aria-busy="true" data-loading></progress>
+
 <nav hx-target="#body-main">
   <ul>
     <li>
-      <a href="#" hx-get="/">
+      <a class="logo" href="#" hx-get="/">
         {% include "logo.svg" %}
       </a>
-      <span aria-busy="true" data-loading></span>
     </li>
   </ul>
   <ul>
@@ -18,8 +19,8 @@
           toggle @hidden on .login-register
         end"
         href="#">
-          <span class="login-register">Registrieren</span>
-          <span class="login-register" hidden>Anmelden</span>
+          <span class="login-register">{{ L["Sign up"] }}</span>
+          <span class="login-register" hidden>{{ L["Sign in"] }}</span>
       </a>
     </li>
     {% else %}
@@ -29,37 +30,37 @@
         <summary>🧰</summary>
         <ul dir="rtl">
           <li>
-            <a href="#" class="secondary" hx-get="/objects/projects">Projekte</a>
+            <a href="#" class="secondary" hx-get="/objects/projects">{{ L["Projects"] }}</a>
           </li>
           <li>
-            <a href="#" class="secondary" hx-get="/objects/cars">Fahrzeuge</a>
+            <a href="#" class="secondary" hx-get="/objects/cars">{{ L["Cars"] }}</a>
           </li>
           <li>
-            <a href="#" class="secondary" hx-get="/processings/upload">AI Erfassung</a>
+            <a href="#" class="secondary" hx-get="/processings/upload">{{ L["AI recognition"] }}</a>
           </li>
           {% if "system" in session.get("acl", []) %}
           <li>
             <hr>
-            <small>Zugang</small>
+            <small>{{ L["Access"] }}</small>
           </li>
           <li>
-            <a href="#" hx-get="/users">Benutzer</a>
+            <a href="#" hx-get="/users">{{ L["Users"] }}</a>
           </li>
           <li>
-            <a href="#" hx-get="/groups">Gruppen</a>
+            <a href="#" hx-get="/groups">{{ L["User groups"] }}</a>
           </li>
           <li>
             <hr>
-            <small>System</small>
+            <small>{{ L["System"] }}</small>
           </li>
           <li>
-            <a href="#" hx-get="/system/logs">Logs</a>
+            <a href="#" hx-get="/system/logs">{{ L["Logs"] }}</a>
           </li>
           <li>
-            <a href="#" hx-get="/system/settings">Einstellungen</a>
+            <a href="#" hx-get="/system/settings">{{ L["Settings"] }}</a>
           </li>
           <li>
-            <a href="#" hx-get="/system/status">Status</a>
+            <a href="#" hx-get="/system/status">{{ L["Health"] }}</a>
           </li>
           {% endif %}
         </ul>
@@ -71,11 +72,11 @@
         <summary>👤 {{ session.login }}</summary>
         <ul dir="rtl">
           <li>
-            <a href="#" hx-get="/profile/">Profil</a>
+            <a href="#" hx-get="/profile/">{{ L["Profile"] }}</a>
           </li>
           <li>
             <hr>
-            <a href="#" hx-post="/logout" hx-swap="innerHTML">Abmelden</a>
+            <a href="#" hx-post="/logout" hx-swap="innerHTML">{{ L["Sign out"] }}</a>
           </li>
         </ul>
       </details>
@@ -85,17 +86,17 @@
 </nav>
 
 <details name="quick-control">
-  <summary>Schnellwahl & Einstellungen</summary>
+  <summary>{{ L["Quick settings"] }}</summary>
   {% if session["login"] %}
   <div hx-target="#body-main" class="grid-space-between">
-    <button class="contrast outline"
-    id="menu-vault-dialog-toggle"
+    <button
+    id="vault-dialog-toggle"
     _="on click
       halt the event
-      add @open to #menu-vault-dialog
-      call #menu-dialog-vault-unlock-pin.focus()
+      add @open to #vault-dialog
+      call #vault-unlock-pin.focus()
     end">
-      Tresor <span id="menu-vault-indicator"></span>
+      🔒 <span id="vault-indicator"></span>
     </button>
     <div>
     {% for role in session.get("acl", []) %}
@@ -103,26 +104,27 @@
     {% endfor %}
     </div>
   </div>
-  <dialog id="menu-vault-dialog">
+  <dialog id="vault-dialog">
     <article>
       <header>
-        <h6>Manage tresor</h6>
+        <h6>{{ L["Manage Vault"] }}</h6>
       </header>
-      <p>Enter your password below. The tresor will be kept unlocked until you refresh the window or lock it.</p>
-      <fieldset _="install tresorToggle">
+      <p>{{ L["Your vault will be kept unlocked until you refresh the window or lock it"] }}</p>
+      <fieldset _="install vaultToggle">
         <input hx-disable
-          id="menu-dialog-vault-unlock-pin"
-          name="menu-dialog-vault-unlock-pin"
+          id="vault-unlock-pin"
+          name="vault-unlock-pin"
           type="password"
+          placeholder="{{ L["Vault password"] }}"
           autocomplete="off"
           autocorrect="off"
           data-protonpass-ignore="true"
           autocapitalize="off"
           spellcheck="false"/>
-        <a role="button" href="#" id="menu-dialog-vault-unlock" data-tresor="{{ session.profile.tresor or "" }}">...</a>
+        <a role="button" href="#" id="vault-unlock" data-vault='{{ session.profile.vault|tojson }}'>...</a>
       </fieldset>
       <footer>
-        <button _="on click remove @open from closest <dialog/>">Close</button>
+        <button _="on click remove @open from closest <dialog/>">{{ L["Close"] }}</button>
       </footer>
     </article>
   </dialog>
@@ -132,10 +134,10 @@
     <span id="ws-indicator"
       {% if session["login"] %}
       class="no-text-decoration"
-      data-tooltip="Disconnected"
+      data-tooltip="{{ L["Disconnected"] }}"
       {% else %}
       class="no-text-decoration dark"
-      data-tooltip="Not logged in"
+      data-tooltip="{{ L["Not signed in"] }}"
       {% endif %}
       hx-swap-oob="outerHTML">⭕</span>
     <span id="nav-theme-bulb"

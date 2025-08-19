@@ -12,27 +12,27 @@ DATA FIELDS
 #}
 
 {% for k, v in schema.properties.items() if (k not in system_fields or "system" in session["acl"]) and (k in fields or not fields) %}
-  {% set form_id = current_data._form_id %}
+  {% set form_id = current_data._form_id ~ "-" ~ k %}
   {% set field_name = root_key ~ "." ~ k if root_key else k %}
 
   {% if v.type in ["text", "email", "number"] %}
     <fieldset data-loading-disable>
-      <label for="{{ form_id }}">{{ v.title }}</label>
+      <label for="{{ form_id }}">{{ L[v.title] }}</label>
       <input {{ v.input_extra|safe }} id="{{ form_id }}"
         name="{{ field_name }}"
         type="{{ v.type }}"
         value="{% if current_data[k] == None %}{{ v.default or '' }}{% else %}{{ current_data[k] }}{% endif %}">
       {% if v.description %}
-      <small>{{ v.description|safe }}</small>
+      <small>{{ L[v.description|safe] }}</small>
       {% endif %}
     </fieldset>
 
   {% elif v.type == "location" %}
 
     <fieldset data-loading-disable data-field-type="location">
-      <label>{{ v.title }}</label>
+      <label>{{ L[v.title] }}</label>
       {% if v.description %}
-      <small>{{ v.description|safe }}</small>
+      <small>{{ L[v.description|safe] }}</small>
       {% endif %}
       {% if current_data[k] and current_data[k]._is_valid%}
       <div id="leaflet-{{ form_id }}" _="install selectFromLeaflet(
@@ -41,13 +41,13 @@ DATA FIELDS
           coords: { lat: {{ current_data[k].lat }}, lon: {{ current_data[k].lon }}, display_name: '{{ current_data[k].display_name }}', zoom: 15 },
           frozen: true
       })">
-      <div class="grid-space-between">
+      <div>
         <mark>{{ current_data[k].display_name }}</mark>
         <a href="" _="on click
           halt the event
           trigger unfreeze on #leaflet-{{ form_id }}
           remove me
-        end">Neuen Standort festlegen</a>
+        end">{{ L["Select new location"] }}</a>
       </div>
       {% else %}
       <div id="leaflet-{{ form_id }}" _="install selectFromLeaflet(formId: '{{ form_id }}')">
@@ -60,11 +60,11 @@ DATA FIELDS
           </p>
           <div class="grid-space-between">
             <span class="pointer" id="leaflet-current-position-{{ form_id }}">
-              🎯 Standort <span id="leaflet-current-accuracy-{{ form_id }}">unbekannt</span>
+              🎯 {{ L["Location"] }} <span id="leaflet-current-accuracy-{{ form_id }}">{{ L["Unknown"]|lower }}</span>
             </span>
             <div class="grid-end">
               <details class="dropdown" hx-disinherit="*">
-                <summary>Projekte</summary>
+                <summary>{{ L["Projects"] }}</summary>
                 <ul dir="rtl" id="leaflet-additional-markers-{{ form_id }}">
                 {% set current_project = current_data.assigned_project or object.id|touuid %}
                 {% for project_id, project_data in request.form_options.projects.items() if (project_data.permitted == True or project_id == current_project) and project_data.location._is_valid %}
@@ -81,7 +81,7 @@ DATA FIELDS
                   </label>
                 </li>
                 {% else %}
-                <li>Kein Projekt verfügbar</li>
+                <li>{{ L["No project available"] }}</li>
                 {% endfor %}
                 </ul>
               </details>
@@ -98,10 +98,10 @@ DATA FIELDS
   {% elif v.type == "assets" %}
 
     <fieldset data-loading-disable>
-      <legend>{{ v.title }}</legend>
+      <legend>{{ L[v.title] }}</legend>
       {% if v.description %}
       <p>
-        <small>{{ v.description|safe }}</small>
+        <small>{{ L[v.description|safe] }}</small>
       </p>
       {% endif %}
       {% if current_data[k] %}
@@ -116,7 +116,7 @@ DATA FIELDS
         <input type="hidden" name="{{ field_name }}" value='{{ current_data[k]|tojson }}'/>
       {% else %}
       <p>
-        <mark>Keine Dateien verfügbar</mark>
+        <mark>{{ L["No files available"] }}</mark>
       </p>
       {% endif %}
     </fieldset>
@@ -124,32 +124,32 @@ DATA FIELDS
   {% elif v.type == "textarea" %}
 
     <fieldset data-loading-disable>
-      <label for="{{ form_id }}">{{ v.title }}</label>
+      <label for="{{ form_id }}">{{ L[v.title] }}</label>
       <textarea {{ v.input_extra|safe }} id="{{ form_id }}" rows="10" name="{{ field_name }}">
         {%- if current_data[k] == None %}{{ v.default or '' }}{% else %}{{ current_data[k] }}{% endif -%}
       </textarea>
       {% if v.description %}
-      <small>{{ v.description|safe }}</small>
+      <small>{{ L[v.description|safe] }}</small>
       {% endif %}
     </fieldset>
 
   {% elif v.type in ["date", "datetime-local"] %}
 
     <fieldset data-loading-disable>
-      <label for="{{ form_id }}">{{ v.title }}</label>
+      <label for="{{ form_id }}">{{ L[v.title] }}</label>
       <input {{ v.input_extra|safe }} id="{{ form_id }}"
         name="{{ field_name }}"
         type="{{ v.type }}"
         value="{% if current_data[k] == None %}{{ v.default or '' }}{% else %}{{ current_data[k] }}{% endif %}">
       {% if v.description %}
-      <small>{{ v.description|safe }}</small>
+      <small>{{ L[v.description|safe] }}</small>
       {% endif %}
     </fieldset>
 
   {% elif v.type == "select:multi" or v.type == "select" %}
 
     <fieldset data-loading-disable>
-      <label for="{{ form_id }}">{{ v.title }}</label>
+      <label for="{{ form_id }}">{{ L[v.title] }}</label>
       <select {{ v.input_extra|safe }}
         {% if v.type == "select:multi" %}
         multiple
@@ -162,45 +162,45 @@ DATA FIELDS
         {% endfor %}
       </select>
       {% if v.description %}
-      <small>{{ v.description|safe }}</small>
+      <small>{{ L[v.description|safe] }}</small>
       {% endif %}
     </fieldset>
 
-  {% elif v.type == "tresor" %}
+  {% elif v.type == "vault" %}
 
     {% if request.path == "/profile/" %}
-    <details name="tresor">
-      <summary>{{ v.title }}</summary>
-      <div data-field-type="tresor" _="install tresorConfig(formId: '{{ form_id }}', isInit: {{ "true" if current_data[k] else "false" }})">
+    <details name="vault">
+      <summary>{{ L[v.title] }}</summary>
+      <div data-field-type="vault" _="install vaultConfig(formId: '{{ form_id }}', isInit: {{ "true" if current_data[k] else "false" }})">
         <input id="{{ form_id }}" type="hidden" {{ v.input_extra|safe }}
           name="{{ field_name }}"
-          value='{% if current_data[k] %}{{ current_data[k]|tojson }}{% endif %}'/>
+          value='{{ current_data[k]|tojson }}'/>
         {% if not current_data[k] %}
+        <p>{{ L["Setup vault"] }}</p>
         <fieldset>
-          <label>Passwort festlegen</label>
-          <input id="tresor-password-{{ form_id }}" type="password" {{ v.input_extra|safe }} />
-          <small>Passwort</small>
+          <label>{{ L["Password"] }}</label>
+          <input id="vault-password-{{ form_id }}" type="password" {{ v.input_extra|safe }} />
         </fieldset>
         <fieldset>
-          <input id="tresor-password2-{{ form_id }}" type="password" {{ v.input_extra|safe }} />
-          <small>Passwort wiederholen</small>
+          <label>{{ L["Password confirmation"] }}</label>
+          <input id="vault-password2-{{ form_id }}" type="password" {{ v.input_extra|safe }} />
         </fieldset>
         {% else %}
+        <p>{{ L["Change password"] }}</p>
         <fieldset>
-          <label>Passwort ändern</label>
-          <input id="tresor-password-{{ form_id }}" type="password" {{ v.input_extra|safe }} />
-          <small>Aktuelles Passwort</small>
+          <label>{{ L["Current password"] }}</label>
+          <input id="vault-password-{{ form_id }}" type="password" {{ v.input_extra|safe }} />
         </fieldset>
         <fieldset>
-          <input id="tresor-password-new-{{ form_id }}" type="password" {{ v.input_extra|safe }} />
-          <small>Neues Passwort</small>
+          <label>{{ L["New password"] }}</label>
+          <input id="vault-password-new-{{ form_id }}" type="password" {{ v.input_extra|safe }} />
         </fieldset>
         <fieldset>
-          <input id="tresor-password-new2-{{ form_id }}" type="password" {{ v.input_extra|safe }} />
-          <small>Neues Passwort wiederholen</small>
+          <label>{{ L["Repeat new password"] }}</label>
+          <input id="vault-password-new2-{{ form_id }}" type="password" {{ v.input_extra|safe }} />
         </fieldset>
         {% endif %}
-        <a id="tresor-apply-{{ form_id }}" role="button">Anwenden</a>
+        <a id="vault-apply-{{ form_id }}" role="button">{{ L["Apply"] }}</a>
       </div>
     </details>
     {% endif %}
@@ -208,7 +208,7 @@ DATA FIELDS
   {% elif v.type == "datalist" %}
 
     <fieldset data-loading-disable>
-      <label for="{{ form_id }}">{{ v.title }}</label>
+      <label for="{{ form_id }}">{{ L[v.title] }}</label>
       <input list="datalist-{{ form_id }}"
         name="{{ field_name }}"
         id="{{ form_id }}"
@@ -220,17 +220,17 @@ DATA FIELDS
         {% endfor %}
       </datalist>
       {% if v.description %}
-      <small>{{ v.description|safe }}</small>
+      <small>{{ L[v.description|safe] }}</small>
       {% endif %}
     </fieldset>
 
   {% elif (v.type == "users:multi" or v.type == "users") %}
     <fieldset data-loading-disable data-field-type="users">
       {% if not request.form_options.users %}
-      <label for="{{ form_id }}">{{ v.title }}</label>
-      <p><mark>Es gibt keine zuweisbaren Benutzer</mark></p>
+      <label for="{{ form_id }}">{{ L[v.title] }}</label>
+      <p><mark>{{ L["There is no assignable user"] }}</mark></p>
       {% else %}
-      <label for="{{ form_id }}">{{ v.title }}</label>
+      <label for="{{ form_id }}">{{ L[v.title] }}</label>
       <select {{ v.input_extra|safe }}
         {% if v.type == "users:multi" %}
         multiple
@@ -243,7 +243,7 @@ DATA FIELDS
         {% endfor %}
       </select>
       {% if v.description %}
-      <small>{{ v.description|safe }}</small>
+      <small>{{ L[v.description|safe] }}</small>
       {% endif %}
     </fieldset>
     {% endif %}
@@ -270,7 +270,7 @@ DATA FIELDS
     </template>
     <fieldset data-loading-disable id="{{ form_id }}" _="init
       exit unless length of .item-{{ form_id }} in me == 0
-      {% for list_value in current_data[k] %}
+      {% for list_value in current_data[k] or [] %}
         render #list:item with (value: '{{ list_value }}')
         put the result at the end of me
       {% else %}
@@ -287,10 +287,10 @@ DATA FIELDS
         render #list:item
         put the result at the end of me
       end">
-      <legend>{{ v.title }} <a href="#" class="add-list-item">Add</a></legend>
+      <legend>{{ L[v.title] }} <a href="#" class="add-list-item">Add</a></legend>
     </fieldset>
     {% if v.description %}
-    <small>{{ v.description|safe }}</small>
+    <small>{{ L[v.description|safe] }}</small>
     {% endif %}
 
   {% elif v.type == "toggle" %}
@@ -301,14 +301,14 @@ DATA FIELDS
           type="checkbox"
           role="switch"
           {{ "checked" if current_data[k] == True }} />
-          {{ v.title }}
+          {{ L[v.title] }}
         <input id="{{ form_id }}"
           name="{{ field_name }}"
           value="{{ "true" if current_data[k] == True else "false" }}"
           type="hidden" {{ v.input_extra|safe }}>
       </label>
       {% if v.description %}
-      <small>{{ v.description|safe }}</small>
+      <small>{{ L[v.description|safe] }}</small>
       {% endif %}
     </fieldset>
 
@@ -316,14 +316,14 @@ DATA FIELDS
     <fieldset data-loading-disable data-field-type="project">
     {% set permitted_projects = request.form_options.projects.values() | selectattr("permitted", "eq", True) | list %}
     {% if not current_data[k] and not permitted_projects %}
-      <label for="{{ form_id }}">{{ v.title }}</label>
-      <p><mark>Es gibt kein zuweisbares Projekt</mark></p>
+      <label for="{{ form_id }}">{{ L[v.title] }}</label>
+      <p><mark>{{ L["There is no assignable project"] }}</mark></p>
     {% else %}
-      <label for="{{ form_id }}">{{ v.title }}</label>
+      <label for="{{ form_id }}">{{ L[v.title] }}</label>
       <select {{ v.input_extra|safe }}
         name="{{ field_name }}"
         id="{{ form_id }}">
-        <option disabled selected>Bitte auswählen</option>
+        <option disabled selected>{{ L["Please select"] }}</option>
         {% for project_id, project_data in request.form_options.projects.items() %}
           {%- if project_data.permitted == True -%}
           <option value="{{ project_id }}" {{ "selected" if project_id == current_data[k] }}>{{ project_data.name }}</option>
@@ -333,7 +333,7 @@ DATA FIELDS
         {% endfor %}
       </select>
       {% if v.description %}
-      <small>{{ v.description|safe }}</small>
+      <small>{{ L[v.description|safe] }}</small>
       {% endif %}
     {% endif %}
     </fieldset>

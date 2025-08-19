@@ -1,7 +1,6 @@
 import magic
 import os
 
-from components.cluster import cluster
 from components.cluster.exceptions import (
     FileGetException,
     FileDelException,
@@ -9,12 +8,15 @@ from components.cluster.exceptions import (
 )
 from components.logs import logger
 from components.models.assets import Asset, UUID, uuid4, validate_call
-from components.utils import ensure_list, is_path_within_cwd
-from components.utils.images import image_bytes_to_webp, convert_file_to_webp
 
 
 @validate_call
-async def request_asset(asset_uuid: UUID, peer: str | list = []) -> bool:
+async def request_asset(
+    cluster: object, asset_uuid: UUID, peer: str | list = []
+) -> bool:
+    from components.utils.misc import ensure_list
+    from components.utils.images import convert_file_to_webp
+
     asset_id = str(asset_uuid)
     if os.path.exists(f"assets/{asset_id}"):
         return True
@@ -33,7 +35,9 @@ async def request_asset(asset_uuid: UUID, peer: str | list = []) -> bool:
 
 
 @validate_call
-async def remove_asset(asset_uuid: UUID, remote_only: bool = False) -> None:
+async def remove_asset(
+    cluster: object, asset_uuid: UUID, remote_only: bool = False
+) -> None:
     asset_id = str(asset_uuid)
     asset_file = f"assets/{asset_id}"
     for peer in cluster.peers.get_established():
@@ -53,7 +57,7 @@ async def remove_asset(asset_uuid: UUID, remote_only: bool = False) -> None:
 
 
 @validate_call
-async def push_asset(asset_uuid: UUID) -> None:
+async def push_asset(cluster: object, asset_uuid: UUID) -> None:
     asset_id = str(asset_uuid)
     asset_file = f"assets/{asset_id}"
     for peer in cluster.peers.get_established():
@@ -61,4 +65,4 @@ async def push_asset(asset_uuid: UUID) -> None:
             await cluster.files.fileput(asset_file, asset_file, peer)
             logger.success(f"Sent {asset_id} to {peer}")
         except FilePutException as e:
-            logger.warning(f"Cannot send asset from {peer}: {e}")
+            logger.warning(f"Cannot send asset to {peer}: {e}")

@@ -1,6 +1,7 @@
 import asyncio
 import re
 from components.database import *
+from components.database import LRUCache
 from components.logs import logger
 from components.models.objects import *
 from components.utils import ensure_list, merge_models, batch
@@ -22,11 +23,6 @@ def session_context(fn):
         return await fn(*args, **kwargs)
 
     return inner
-
-
-@validate_call
-async def _populate_form_cache(object_type: Literal[*model_classes["types"]]):
-    IN_MEMORY_DB["CACHE"]["FORMS"][object_type] = await form_options(object_type)
 
 
 @session_context
@@ -96,9 +92,7 @@ async def delete(
     async with TinyDB(**dbparams()) as db:
         db.table(object_type).remove(query)
 
-    t = asyncio.create_task(_populate_form_cache(object_type))
-    BACKGROUND_TASKS.add(t)
-    t.add_done_callback(BACKGROUND_TASKS.discard)
+    STATE.query_cache.pop(object_type, None)
 
     return object_ids
 
@@ -206,9 +200,8 @@ async def patch(
             )
             patched_objects.append(patched_object.id)
 
-    t = asyncio.create_task(_populate_form_cache(object_type))
-    BACKGROUND_TASKS.add(t)
-    t.add_done_callback(BACKGROUND_TASKS.discard)
+    if patched_objects:
+        STATE.query_cache.pop(object_type, None)
 
     return patched_objects
 
@@ -261,9 +254,7 @@ async def create(
         insert_data = create_object.model_dump(mode="json")
         db.table(object_type).insert(insert_data)
 
-    t = asyncio.create_task(_populate_form_cache(object_type))
-    BACKGROUND_TASKS.add(t)
-    t.add_done_callback(BACKGROUND_TASKS.discard)
+    STATE.query_cache.pop(object_type, None)
 
     return create_object.id
 
@@ -281,6 +272,11 @@ async def search(
         pagination = ObjectPagination.model_validate(pagination)
 
     async with TinyDB(**dbparams()) as db:
+        table = db.table(object_type, cache_size=200)
+
+        if object_type in STATE.query_cache:
+            table._query_cache.update(STATE.query_cache[object_type])
+
         and_parts = []
         or_parts = []
 
@@ -333,9 +329,10 @@ async def search(
             final_query = None
 
         if final_query:
-            matched_objects = db.table(object_type).search(final_query)
+            matched_objects = table.search(final_query)
+            STATE.query_cache[object_type] = dict(table._query_cache)
         else:
-            matched_objects = db.table(object_type).all()
+            matched_objects = table.all()
 
     if pagination:
         if pagination.sort_attr == "name":
@@ -392,23 +389,3 @@ async def search(
             ),
             pagination,
         )
-
-
-@validate_call
-async def form_options(object_type: Literal[*model_classes["types"]]):
-    results, pagination = await search(
-        object_type=object_type,
-        q="",
-        session_context=("", ["system"]),
-    )
-    return {
-        UUID(result.id): {
-            "name": result.name,
-            "assigned_users": result.details.assigned_users,
-            "radius": result.details.radius if hasattr(result.details, "radius") else 0,
-            "location": result.details.location
-            if hasattr(result.details, "location")
-            else None,
-        }
-        for result in results
-    }

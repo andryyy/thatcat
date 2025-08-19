@@ -1,7 +1,6 @@
 import components.users
 
 from .quart import request, render_template
-from components.database import IN_MEMORY_DB
 from components.utils import deep_model_dump
 
 
@@ -21,6 +20,7 @@ async def ws_htmx(
     channel, strategy: str, data, if_path: str = "", exclude_self: bool = False
 ):
     from components.models.users import USER_ACLS
+    from components.database import STATE
 
     if channel.startswith("_") and channel in [f"_{acl}" for acl in USER_ACLS]:
         channel = channel.removeprefix("_")
@@ -28,7 +28,7 @@ async def ws_htmx(
         for user in [user.login for user in users]:
             await ws_htmx(user, strategy, data, if_path, exclude_self)
 
-    for ws, ws_data in IN_MEMORY_DB["WS_CONNECTIONS"].get(channel, {}).items():
+    for ws, ws_data in STATE.ws_connections.get(channel, {}).items():
         if exclude_self and ws.cookies == request.cookies:
             continue
         if not if_path or ws_data.get("path", "").startswith(if_path):
@@ -40,9 +40,6 @@ async def render_or_json(tpl, headers, **context):
         converted_context = {
             key: deep_model_dump(value) for key, value in context.items()
         }
-        print(converted_context)
-        print(next(filter(lambda x: x, converted_context.values()), dict()))
-
         return next(filter(lambda x: x, converted_context.values()), dict())
 
     return await render_template(tpl, **context)

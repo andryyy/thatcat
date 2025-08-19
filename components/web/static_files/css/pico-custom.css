@@ -2964,7 +2964,6 @@ textarea,
   --pico-font-family-sans-serif: "Go", system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, var(--pico-font-family-emoji);
   --pico-form-element-spacing-vertical: .5rem;
   --pico-form-element-spacing-horizontal: .5rem;
-  --pico-border-radius: 0;
   --pico-font-size: 12pt;
   --pico-line-height: 1.4;
 }
@@ -3069,6 +3068,9 @@ table td > button {
 
 [data-loading] {
   display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
 }
 
 .pointer {
@@ -3279,8 +3281,14 @@ dialog article {
   padding: var(--pico-form-element-spacing-vertical) var(--pico-form-element-spacing-horizontal);
 }
 
-nav details.dropdown {
+header nav .logo > svg {
+  width: 100%;
+  max-width: 5rem;
+}
+
+header nav details.dropdown {
   width: max-content;
+  display: inline-block;
 }
 
 :not(header) > details:not(.dropdown) > summary {
@@ -3352,15 +3360,12 @@ fieldset.system-field label:before {
 }
 
 [data-field-type=location],
-[data-field-type=tresor] {
+[data-field-type=vault] {
   padding: var(--pico-spacing);
-  border: 0.25rem dashed var(--pico-blockquote-border-color);
-}
-
-button#menu-vault-dialog-toggle {
-  padding: calc(var(--pico-form-element-spacing-vertical) / 1.5) calc(var(--pico-form-element-spacing-horizontal) / 1.5);
-  border-color: var(--pico-form-element-border-color);
-  --pico-border-radius: .5rem;
+  border: 0;
+  border-left: 0.25rem;
+  border-style: solid;
+  border-color: var(--pico-blockquote-border-color);
 }
 
 .color-red-950 {

@@ -1,16 +1,25 @@
 <form
   hx-trigger="submit throttle:200ms"
-  hx-patch="/users/{{ user.id }}">
+  hx-patch="/users/{{ user.id }}"
+  hx-vals='js:{"active":document.getElementById("active-{{ user.id }}").checked}'>
 
   <article>
-    <h6>General</h6>
+    <h6>{{ L["General"] }}</h6>
     <fieldset>
-      <label>Login</label>
+      <label for="login-{{ user.id }}">{{ L["Username"] }}</label>
       <input name="login"
         type="text"
+        id="login-{{ user.id }}"
         value="{{ user.login }}"
         required
         hx-on:change="document.getElementById('login-{{ user.id }}').textContent=this.value">
+    </fieldset>
+    <fieldset>
+      <label>
+        <input id="active-{{ user.id }}"
+          type="checkbox"
+          role="switch" {{ "checked" if user.active }} /> {{ L["User enabled"] }}
+      </label>
     </fieldset>
   </article>
 
@@ -40,7 +49,7 @@
     {% for credential in user.credentials %}
     <fieldset>
       {% if session["cred_id"] == credential.id|hex %}
-        <mark>in use</mark>
+        <mark>{{ L["Signed in"] }}</mark>
       {% endif %}
       <div _="install inlineHtmxRename()"
       contenteditable
@@ -55,14 +64,14 @@
         <a href="#" class="{{ "color-red" if not credential.active else "color-green"}}"
           hx-patch="/users/{{ user.id }}/credential/{{ credential.id|hex }}"
           hx-vals='js:{"active": {{ "true" if not credential.active else "false"}}}'
-          hx-params="active">{{ "Deaktiviert" if not credential.active else "Aktiviert"}}</a>
+          hx-params="active">{{ L["Passkey disabled"] if not credential.active else L["Passkey enabled"] }}</a>
         <a href="#" class="color-red"
           hx-confirm="Delete passkey?"
           _="install confirmButton"
           hx-trigger="confirmedButton throttle:200ms"
-          hx-delete="/users/{{ user.id }}/credential/{{ credential.id|hex }}">Entfernen</a>
+          hx-delete="/users/{{ user.id }}/credential/{{ credential.id|hex }}">{{ L["Remove"] }}</a>
       </div>
-      <small>Zuletzt eingeloggt:
+      <small>{{ L["Last login"] }}:
         {% if credential.last_login %}
         <span class="" value="{{ credential.last_login }}" _="init set dt to my @value js(dt) return new Date(dt).toLocaleString() end then put result into me"></span>
         {% else %}-
@@ -74,7 +83,7 @@
   </article>
 
   <article>
-    <h6>Profile data</h6>
+    <h6>{{ L["Profile"] }}</h6>
     {% with
       schema=schemas.user_profile,
       current_data=user.profile,
@@ -84,5 +93,5 @@
     {% endwith %}
   </article>
 
-  <button data-loading-disable type="submit">Update</button>
+  <button data-loading-disable data-loading-aria-busy type="submit">{{ L["Save"] }}</button>
 </form>

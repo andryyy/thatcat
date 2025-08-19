@@ -2,12 +2,12 @@ import base64
 import itertools
 import re
 
-from components.utils.ai import google_vision_api
-
 
 class VinTool:
     @classmethod
     async def extract_from_bytes(self, file_bytes: bytes):
+        from components.utils.ai import google_vision_api
+
         base64_image = base64.b64encode(file_bytes).decode("utf-8")
 
         try:
