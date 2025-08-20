@@ -1,18 +1,13 @@
 import json
 
+from .requests import async_request
+
 
 async def google_vision_api(
-    base64_image: str, feature_types: list = ["TEXT_DETECTION"]
+    api_key: str, base64_image: str, feature_types: list = ["TEXT_DETECTION"]
 ):
-    from components.system import get_system_settings
-    from components.utils.requests import async_request
-
-    settings = await get_system_settings()
-    if not settings.details.GOOGLE_VISION_API_KEY:
-        raise Exception("No Google Vision API key found in settings")
-
     status_code, response_text = await async_request(
-        f"https://vision.googleapis.com/v1/images:annotate?key={settings.details.GOOGLE_VISION_API_KEY}",
+        f"https://vision.googleapis.com/v1/images:annotate?key={api_key}",
         method="POST",
         data={
             "requests": [

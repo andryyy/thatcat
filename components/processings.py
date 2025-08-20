@@ -1,18 +1,21 @@
 import asyncio
 
+from components.cluster import cluster
+from components.cluster.locking import ClusterLock
 from components.database import *
+from components.logs import logger
 from components.models.assets import Asset
 from components.models.coords import Location
-from components.models.processings import ValidationError, validate_call, UUID, uuid4
-from components.logs import logger
-from components.utils.assets import remove_asset, push_asset
+from components.models.processings import CreateProcessingData
+from components.models.processings import UUID, ValidationError, uuid4, validate_call
+from components.system import get_system_settings
+from components.utils.assets import push_asset, remove_asset
 from components.utils.images import (
-    convert_file_to_webp,
     ImageExif,
     UnidentifiedImageError,
+    convert_file_to_webp,
 )
 from components.utils.osm import coords_to_display_name
-from components.models.processings import CreateProcessingData
 from components.utils.vins import VinTool
 from components.web.utils.quart import current_app, session
 
@@ -57,8 +60,9 @@ async def all(session_context: tuple = ()):
 
 
 async def process_image(image_bytes, image_filename):
-    from components.cluster import cluster
-    from components.cluster.locking import ClusterLock
+    settings = await get_system_settings()
+    if not settings.details.GOOGLE_VISION_API_KEY:
+        raise ValueError("No Google Vision API key found in settings")
 
     async with processing_limiter:
         try:
@@ -72,8 +76,11 @@ async def process_image(image_bytes, image_filename):
             return
 
         try:
-            vins = await VinTool.extract_from_bytes(image_bytes) or [None]
+            vins = await VinTool.text_detection(
+                settings.details.GOOGLE_VISION_API_KEY, image_bytes
+            ) or [None]
         except Exception as e:
+            logger.error(f"VIN text extraction error for file {image_filename}: {e}")
             vins = [None]
 
         asset_id = str(uuid4())
@@ -89,8 +96,8 @@ async def process_image(image_bytes, image_filename):
         )
 
         try:
+            await push_asset(cluster, asset_id)
             async with ClusterLock("processing"):
-                await push_asset(cluster, asset_id)
                 async with TinyDB(**dbparams()) as db:
                     for vin in vins:
                         create_processing = CreateProcessingData.model_validate(

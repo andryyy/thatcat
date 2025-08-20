@@ -71,7 +71,7 @@
           hx-trigger="confirmedButton throttle:200ms"
           hx-delete="/users/{{ user.id }}/credential/{{ credential.id|hex }}">{{ L["Remove"] }}</a>
       </div>
-      <small>{{ L["Last login"] }}:
+      <small>{{ L["Last sign in"] }}:
         {% if credential.last_login %}
         <span class="" value="{{ credential.last_login }}" _="init set dt to my @value js(dt) return new Date(dt).toLocaleString() end then put result into me"></span>
         {% else %}-

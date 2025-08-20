@@ -42,12 +42,23 @@ DATA FIELDS
           frozen: true
       })">
       <div>
-        <mark>{{ current_data[k].display_name }}</mark>
-        <a href="" _="on click
-          halt the event
-          trigger unfreeze on #leaflet-{{ form_id }}
-          remove me
-        end">{{ L["Select new location"] }}</a>
+          {{ current_data[k].display_name }}
+          <br>
+          <small>
+            <a class="color-blue locked" href="" _="on click
+              halt the event
+              toggle .locked
+              if I match .locked
+                put '{{ L["Unlock"] }}' into me
+                trigger freeze on #leaflet-{{ form_id }}
+              else
+                put '{{ L["Reset"] }}' into me
+                trigger unfreeze on #leaflet-{{ form_id }}
+              end
+            end">
+            {{ L["Unlock"] }}
+              </a>
+          </small>
       </div>
       {% else %}
       <div id="leaflet-{{ form_id }}" _="install selectFromLeaflet(formId: '{{ form_id }}')">

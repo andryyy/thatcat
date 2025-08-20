@@ -9,6 +9,7 @@ behavior selectFromLeaflet(formId, options)
       call setPos(options.coords.lat, options.coords.lon, options.coords.display_name, true)
       put options.coords.display_name into #{'leaflet-marker-name-' + formId}
     end
+    add @disabled to #{'leaflet-search-query-' + formId} unless not options.frozen
     trigger afterDraw on #{'leaflet-current-position-' + formId}
     call fitToMarkers()
     hide #{'leaflet-loading-' + formId}
@@ -24,13 +25,22 @@ behavior selectFromLeaflet(formId, options)
 
   on unfreeze
     set options.frozen to false
+    remove @disabled from #{'leaflet-search-query-' + formId}
+  end
+
+  on freeze
+    add @disabled to #{'leaflet-search-query-' + formId}
+    call setPos(options.coords.lat, options.coords.lon, options.coords.display_name, true)
+    put options.coords.display_name into #{'leaflet-marker-name-' + formId}
+    set options.frozen to true
   end
 
   on keydown[keyCode == 13] from #{'leaflet-search-query-' + formId} throttled at 1s
     set searchQuery to event.target's value
     if searchQuery
       fetch `/location/search/${searchQuery}` with method:'GET', headers:{content-type:'application/json'}
-      call setPos(result.lat, result.lon, result.display_name, true) unless not result
+      set res to result as Object
+      call setPos(res.lat, res.lon, res.display_name, true) unless not result
     end
   end
 

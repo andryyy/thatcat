@@ -3293,6 +3293,7 @@ header nav details.dropdown {
 
 :not(header) > details:not(.dropdown) > summary {
   color: #3c71f7 !important;
+  word-break: break-word;
 }
 
 article.user-group {

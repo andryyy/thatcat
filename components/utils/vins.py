@@ -2,20 +2,22 @@ import base64
 import itertools
 import re
 
+from .ai import google_vision_api
+
 
 class VinTool:
     @classmethod
-    async def extract_from_bytes(self, file_bytes: bytes):
-        from components.utils.ai import google_vision_api
-
+    async def text_detection(self, vision_api_key: str, file_bytes: bytes):
         base64_image = base64.b64encode(file_bytes).decode("utf-8")
 
         try:
-            ai_response = await google_vision_api(base64_image, ["TEXT_DETECTION"])
+            ai_response = await google_vision_api(
+                vision_api_key, base64_image, ["TEXT_DETECTION"]
+            )
             text = ai_response["responses"][0]["fullTextAnnotation"]["text"]
         except (KeyError, IndexError):
             raise Exception("The provided image did not contain any readable text")
-        except Exception:
+        except Exception as e:
             raise Exception("The Vision API request failed")
 
         vin_matches = re.findall(r"([A-Z0-9]{17})", text)

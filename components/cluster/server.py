@@ -78,7 +78,7 @@ class Server:
         self.peers.remotes[name].cluster = meta_dict["cluster"]
 
         msg = cmd[:150] + (cmd[150:] and "...")
-        logger.debug(f"[← Receiving from {name}][{ticket}] - {msg}")
+        logger.debug(f"← [{name}][{ticket}] - {msg}")
 
         return IncomingData(ticket=ticket, cmd=cmd, sender=name)
 
@@ -224,7 +224,7 @@ class Server:
                     await writer.drain()
 
                     msg = cmd[:150] + (cmd[150:] and "...")
-                    logger.debug(f"[→ Sending to {name}][{ticket}] - {msg}")
+                    logger.debug(f"→ [{name}][{ticket}] - {msg}")
 
                     receivers.append(name)
                 else:

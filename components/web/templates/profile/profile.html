@@ -28,7 +28,7 @@
   </form>
 </article>
 
-<section>
+<section id="profile-passkeys">
   <h6>{{ L["Passkeys"] }}</h6>
   <div class="grid-auto-cols">
     {% for credential in user.credentials|sort(attribute="friendly_name") %}
@@ -55,7 +55,7 @@
             role="switch" {{ "checked" if credential.active }} /> {{ L["Passkey enabled"] }}
         </label>
       </fieldset>
-      <small>{{ L["Last login"] }}:
+      <small>{{ L["Last sign in"] }}:
         {% if credential.last_login %}
         <span class="" value="{{ credential.last_login }}" _="init set dt to my @value js(dt) return new Date(dt).toLocaleString() end then put result into me"></span>
         {% else %}-

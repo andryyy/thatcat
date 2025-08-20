@@ -396,6 +396,7 @@ header nav details.dropdown {
 
 :not(header) > details:not(.dropdown) > summary {
   color: #{$blue-500} !important;
+  word-break: break-word;
 }
 
 article.user-group {

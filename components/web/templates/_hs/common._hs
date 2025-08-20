@@ -147,9 +147,9 @@ behavior bodydefault
   on htmx:responseError
     set status to event.detail.xhr.status
     if status >= 500
-      trigger notification(title: 'Server error', level: 'error', message: 'The server could not handle the given request', duration: 10000)
+      trigger notification(title: '{{ L["Server error"] }}', level: 'error', message: '{{ L["The server could not handle the given request"] }}', duration: 10000)
     else if status == 404
-      trigger notification(title: 'Not found', level: 'error', message: `Route not found: ${event.detail.xhr.responseURL}`, duration: 3000)
+      trigger notification(title: '{{ L["Not found"] }}', level: 'error', message: `{{ L["Route not found"] }}: ${event.detail.xhr.responseURL}`, duration: 3000)
     end
   end
 
@@ -177,7 +177,7 @@ behavior addPasskey(register)
     add @disabled to <button/> in me
     postForm('/auth/register/webauthn/options', me)
     if result.ok
-      call SimpleWebAuthnBrowser.startRegistration(result.text() as Object)
+      call Passkeys.create(result.text() as Object, {{ WEBAUTHN_CHALLENGE_TIMEOUT * 1000 }})
       fetch '/auth/register/webauthn/verify' as response with method:'POST', body: result as JSON, headers:{content-type:'application/json'}
       if result.ok
         if not register
@@ -187,7 +187,7 @@ behavior addPasskey(register)
             message: '{{ L["New passkey was successfully registered"] }}',
             duration: 3000
           )
-          call htmx.ajax('GET', '/profile/', {target:'#body-main'})
+          call htmx.ajax('GET', '/profile/', {target:'#profile-passkeys', select:'#profile-passkeys', swap: 'outerHTML'})
         else
           trigger notification(
             level: 'success',
@@ -195,9 +195,9 @@ behavior addPasskey(register)
             message: '{{ L["Your account was created, you can now log in"] }}',
             duration: 7000
           )
-          remove @disabled from <button/> in me
           trigger click on <.login-register:not([hidden])/>
         end
+        remove @disabled from <button/> in me
       else
         throw(result.text())
       end
@@ -206,7 +206,7 @@ behavior addPasskey(register)
     end
   end
   on exception(error)
-    trigger notification(level: 'error', title: 'Passkey error', message: error, duration: 3000) on body
+    trigger notification(level: 'error', title: '{{ L["Passkey error"] }}', message: error, duration: 3000) on body
     remove @disabled from <button/> in me
   end
 end
@@ -217,7 +217,7 @@ behavior login
     add @disabled to <button/> in me
     postForm('/auth/login/webauthn/options', me)
     if result.ok
-      call SimpleWebAuthnBrowser.startAuthentication(result.text() as Object)
+      call Passkeys.get(result.text() as Object, {{ WEBAUTHN_CHALLENGE_TIMEOUT * 1000 }})
       fetch '/auth/login/webauthn/verify' as response with method:'POST', body: result as JSON, headers:{content-type:'application/json'}
       if result.ok and result.status == 202
         trigger proxyAuthSuccess on body
@@ -231,7 +231,7 @@ behavior login
     end
   end
   on exception(error)
-    trigger notification(level: 'error', title: 'Login failed', message: error, duration: 3000)
+    trigger notification(level: 'error', title: '{{ L["Passkey error"] }}', message: error, duration: 3000)
     remove @disabled from <button/> in me
   end
 end
