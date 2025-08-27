@@ -45,6 +45,8 @@ class UnlockCommand(CommandPluginLeader):
         lock_id, lock_tables = data.payload.split(" ")
         tables = lock_tables.split(",")
 
+        print(tables)
+        print(lock_id)
         for t in tables:
             if lock_id != cluster.locks[t]["id"]:
                 return CritErrors.UNLOCK_ERROR_UNKNOWN_ID.response

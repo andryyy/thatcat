@@ -23,12 +23,16 @@
     </hgroup>
   </article>
   <div id="system-settings"
-    hx-trigger="htmx:afterRequest[event.detail.successful==true] from:#system-settings-form"
+    hx-trigger="reloadSettings"
     hx-target="this"
     hx-select="#system-settings"
     hx-swap="outerHTML"
     hx-get="/system/settings">
-    <form id="system-settings-form" hx-trigger="submit throttle:200ms" hx-patch="/system/settings">
+    <form
+      _="on htmx:afterRequest[event.detail.successful==true] from me trigger reloadSettings on #system-settings"
+      id="system-settings-form"
+      hx-trigger="submit throttle:200ms"
+      hx-patch="/system/settings">
       {% with
         schema=schemas.system_settings,
         current_data=settings.details,

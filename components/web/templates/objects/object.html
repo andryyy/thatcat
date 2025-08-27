@@ -5,8 +5,9 @@
 {% block breadcrumb %}
 <nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
   <ul>
-    <li><span>Objects</span></li>
-    <li><a href="#" hx-target="#body-main" hx-get="/objects/{{ request.view_args.get("object_type") }}">{{ request.view_args.get("object_type")|capitalize }}</a></li>
+    <li><span>{{ L["Objects"] }}</span></li>
+    <li><a href="#" hx-target="#body-main" hx-get="/objects">{{ L["Categories"] }}</a></li>
+    <li><a href="#" hx-target="#body-main" hx-get="/objects/{{ request.view_args.get("object_type") }}">{{ L[request.view_args.get("object_type")|capitalize] }}</a></li>
     <li><a href="#" hx-target="#body-main" hx-get="/objects/{{ request.view_args.get("object_type") }}/{{ object.id }}">{{ object.name }}</a></li>
   </ul>
 </nav>
@@ -18,13 +19,7 @@
   <article class="hide-below-lg">
     <hgroup>
       <h5 id="object-name">{{ object.name }}</h5>
-      <p>
-        Verändere die Details eines Objekt in dieser Maske.
-      </p>
-      <hr>
-      <p>
-        <small>Ein Wert, der mit einem ⚠️ Symbol markiert ist, kann nicht verändert werden.</small>
-      </p>
+      <p>{{ L["Manage details of an object"] }}</p>
     </hgroup>
   </article>
 
@@ -39,9 +34,7 @@
     <form id="object-form" hx-trigger="submit throttle:200ms" hx-patch="/objects/{{ request.view_args.get("object_type") }}/{{ object.id }}">
       {% with
         schema=schemas[request.view_args.object_type],
-        system_fields=system_fields[request.view_args.object_type],
-        current_data=object.details,
-        root_key="details"
+        current_data=object
       %}
         {% include "includes/form_builder.html" %}
       {% endwith %}

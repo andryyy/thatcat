@@ -289,7 +289,8 @@ class Server:
                         f"UNLOCK {lock_id} {','.join(tables)}", self.peers.local.leader
                     )
                     await self.await_receivers(sent, raise_err=True)
-            except IncompleteClusterResponses:
+            except IncompleteClusterResponses as e:
+                print(e)
                 raise LockException("Leader did not respond properly to unlock request")
         elif self.peers.local.role == Role.LEADER:
             self._release_tables(lock_id, tables)
@@ -382,9 +383,19 @@ class Server:
                 )
                 stop_event.set()
 
+            async def _sync_on_first_complete(event):
+                await event.wait()
+                await self.files.sync_folder("assets")
+
             t = asyncio.create_task(self.monitor.server(), name="tickets")
             self.tasks.add(t)
             t.add_done_callback(self.tasks.discard)
+
+            waiter_task = asyncio.create_task(
+                _sync_on_first_complete(self.peers._first_complete)
+            )
+            self.tasks.add(waiter_task)
+            waiter_task.add_done_callback(self.tasks.discard)
 
             try:
                 await stop_event.wait()

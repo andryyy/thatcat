@@ -5,7 +5,7 @@ import random
 
 async def cli_processor(streams: tuple[asyncio.StreamReader, asyncio.StreamWriter]):
     from components.users import what_id, get
-    from components.database import STATE
+    from components.database.states import STATE
 
     try:
         reader, writer = streams

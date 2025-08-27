@@ -3,6 +3,7 @@ import signal
 import ssl
 
 from components.cluster import cluster
+from components.database import db
 from components.logs import logger
 from components.web.app import app
 from config import defaults
@@ -47,6 +48,43 @@ async def main():
         loop.add_signal_handler(sig, handle_shutdown)
 
     try:
+        async with db:
+            await db.build_index(
+                "cars", ["id", "vin", "assigned_users", "assigned_project"]
+            )
+            await db.build_index("projects", ["id", "name", "assigned_users"])
+            await db.build_index("users", ["id", "credentials.id"])
+            await db.define_list_view(
+                "users",
+                [
+                    "login",
+                    "groups",
+                    "created",
+                    "updated",
+                ],
+            )
+            await db.define_list_view(
+                "cars",
+                [
+                    "vin",
+                    "created",
+                    "updated",
+                    "assigned_project",
+                    "assigned_users",
+                ],
+            )
+            await db.define_list_view(
+                "projects",
+                [
+                    "name",
+                    "created",
+                    "updated",
+                    "radius",
+                    "location",
+                    "assigned_users",
+                ],
+            )
+
         async with asyncio.TaskGroup() as tg:
             tg.create_task(
                 serve(

@@ -2,6 +2,4 @@ quart
 jinja2
 pydantic
 email-validator
-tinydb
-aiotinydb
 python-magic

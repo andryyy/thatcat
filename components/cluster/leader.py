@@ -7,6 +7,7 @@ def elect_leader(peers: "Peers") -> None:
         peers.local.leader = None
         peers.local.role = Role.FOLLOWER
         peers.local.cluster = ""
+        peers.local.cluster_complete = False
 
     n_eligible_peers = len(peers.get_established(include_local=True))
     n_all_peers = len(peers.remotes) + 1  # + self
@@ -20,7 +21,7 @@ def elect_leader(peers: "Peers") -> None:
         (
             (peer, peer_data.started)
             for peer, peer_data in peers.remotes.items()
-            if peer_data.healthy
+            if peer_data._full_first_contact
         ),
         key=lambda x: x[1],
         default=(None, float("inf")),
@@ -55,6 +56,22 @@ def elect_leader(peers: "Peers") -> None:
         peers.local.cluster = ";".join(
             peers.get_established(include_local=True, sorted_output=True)
         )
-        peers.local.cluster_complete = n_eligible_peers == n_all_peers
+        # add partial complete
+        if n_eligible_peers == n_all_peers:
+            for peer in peers.remotes:
+                if (
+                    not peers.remotes[peer].cluster
+                    or peers.remotes[peer].cluster == "?CONFUSED"
+                ):
+                    peers.local.cluster_complete = False
+                    break
+            else:
+                if not any(
+                    [peers.local.cluster_complete, peers._first_complete.is_set()]
+                ):
+                    peers._first_complete.set()
+                peers.local.cluster_complete = True
+        else:
+            peers.local.cluster_complete = False
 
     logger.debug(f"Cluster size {n_eligible_peers}/{n_all_peers}")

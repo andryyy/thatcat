@@ -8,15 +8,14 @@ from components.cluster.exceptions import (
 )
 from components.logs import logger
 from components.models.assets import Asset, UUID, uuid4, validate_call
+from .misc import ensure_list
+from .images import convert_file_to_webp
 
 
 @validate_call
 async def request_asset(
     cluster: object, asset_uuid: UUID, peer: str | list = []
 ) -> bool:
-    from components.utils.misc import ensure_list
-    from components.utils.images import convert_file_to_webp
-
     asset_id = str(asset_uuid)
     if os.path.exists(f"assets/{asset_id}"):
         return True

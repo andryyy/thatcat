@@ -2,22 +2,6 @@ class ServerNotRunning(Exception):
     pass
 
 
-class PatchException(Exception):
-    pass
-
-
-class DocumentNotUpdated(PatchException):
-    pass
-
-
-class DocumentNotInserted(PatchException):
-    pass
-
-
-class DocumentNotRemoved(PatchException):
-    pass
-
-
 class ClusterException(Exception):
     pass
 

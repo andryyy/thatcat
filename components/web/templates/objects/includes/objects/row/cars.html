@@ -1,4 +1,4 @@
-{% set match = request.form_options.projects[object.details.assigned_project] %}
+{% set match = request.form_options.projects[object.assigned_project] %}
 <tr _="install trCheckboxSelect">
   <td>
     <input type="checkbox" class="multiselect" name="id" value="{{ object.id }}" autocomplete="off">

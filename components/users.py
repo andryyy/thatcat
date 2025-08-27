@@ -1,8 +1,6 @@
 import asyncio
 import re
 
-from components.database import *
-from components.database import LRUCache
 from components.models.users import *
 from components.utils import batch, merge_models
 from components.web.utils.quart import current_app, session

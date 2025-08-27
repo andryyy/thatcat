@@ -1,97 +1,137 @@
-<form
-  hx-trigger="submit throttle:200ms"
-  hx-patch="/users/{{ user.id }}"
-  hx-vals='js:{"active":document.getElementById("active-{{ user.id }}").checked}'>
+{% if not request.headers.get("Hx-Request") %}
+  {% extends "base.html" %}
+{% endif %}
 
-  <article>
-    <h6>{{ L["General"] }}</h6>
-    <fieldset>
-      <label for="login-{{ user.id }}">{{ L["Username"] }}</label>
-      <input name="login"
-        type="text"
-        id="login-{{ user.id }}"
-        value="{{ user.login }}"
-        required
-        hx-on:change="document.getElementById('login-{{ user.id }}').textContent=this.value">
-    </fieldset>
-    <fieldset>
-      <label>
-        <input id="active-{{ user.id }}"
-          type="checkbox"
-          role="switch" {{ "checked" if user.active }} /> {{ L["User enabled"] }}
-      </label>
-    </fieldset>
+{% block breadcrumb %}
+<nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
+  <ul>
+    <li><span>{{ L["System"] }}</span></li>
+    <li><a href="#" hx-target="#body-main" hx-get="{{ request.path }}">{{ L["Users"] }}</a></li>
+    <li><a href="#" hx-target="#body-main" hx-get="/users/{{ user.id }}">{{ user.login }}</a></li>
+  </ul>
+</nav>
+{% endblock breadcrumb %}
+
+{% block body %}
+
+<section class="grid split-grid">
+  <article class="hide-below-lg">
+    <hgroup>
+      <h5 id="user-{{ user.id }}-login">{{ user.login }}</h5>
+      <p>{{ L["Change details of a user"] }}</p>
+    </hgroup>
   </article>
 
-  <article>
-    <fieldset>
-      <h6>ACL</h6>
-      {% for acl in USER_ACLS %}
-      <input
-        role="switch"
-        id="acl-{{- acl -}}-{{ user.id }}"
-        {% if session["id"] == user.id %}
-        hx-on:click="!this.checked?(confirm('You are logged in as this user. Removing access may result in a broken session.')?null:event.preventDefault()):null"
+  <div id="#user-{{ user.id }}-details"
+    hx-trigger="reloadUserForm"
+    hx-target="this"
+    hx-select="#user-{{ user.id }}-details"
+    hx-select-oob="#user-{{ user.id }}-login"
+    hx-swap="outerHTML"
+    hx-get="/users/{{ user.id }}">
+
+    <form
+      _="on htmx:afterRequest[event.detail.successful==true] from me trigger reloadUserForm on #user-{{ user.id }}-details"
+      id="user-{{ user.id }}-form"
+      hx-trigger="submit throttle:200ms"
+      hx-patch="/users/{{ user.id }}"
+      hx-vals='js:{"active":document.getElementById("active-{{ user.id }}").checked}'>
+      <section>
+        <h6>{{ L["General"] }}</h6>
+        <fieldset>
+          <label for="login-{{ user.id }}">{{ L["Username"] }}</label>
+          <input name="login"
+            type="text"
+            id="login-{{ user.id }}"
+            value="{{ user.login }}"
+            required
+            hx-on:change="document.getElementById('login-{{ user.id }}').textContent=this.value">
+        </fieldset>
+        <fieldset>
+          <label>
+            <input id="active-{{ user.id }}"
+              type="checkbox"
+              role="switch" {{ "checked" if user.active }} /> {{ L["User enabled"] }}
+          </label>
+        </fieldset>
+      </section>
+
+      <section>
+        <fieldset>
+          <h6>ACL</h6>
+          {% for acl in USER_ACLS %}
+          <input
+            role="switch"
+            id="acl-{{- acl -}}-{{ user.id }}"
+            {% if session["id"] == user.id %}
+            hx-on:click="!this.checked?(confirm('You are logged in as this user. Removing access may result in a broken session.')?null:event.preventDefault()):null"
+            {% endif %}
+            name="acl"
+            value="{{ acl }}"
+            type="checkbox" {{ "checked" if acl in user.acl }}>
+          <label for="acl-{{- acl -}}-{{ user.id }}">{{ acl|capitalize }}</label>
+          {% endfor %}
+        </fieldset>
+      </section>
+
+      <section>
+        <h6>{{ L["Profile"] }}</h6>
+        {% with
+          schema=schemas.user_profile,
+          current_data=user.profile,
+          root_key="profile"
+        %}
+          {% include "includes/form_builder.html" %}
+        {% endwith %}
+      </section>
+
+      <article>
+        <h6>Passkeys</h6>
+        {% if not user.credentials %}
+        <i>No passkeys available</i>
         {% endif %}
-        name="acl"
-        value="{{ acl }}"
-        type="checkbox" {{ "checked" if acl in user.acl }}>
-      <label for="acl-{{- acl -}}-{{ user.id }}">{{ acl|capitalize }}</label>
-      {% endfor %}
-    </fieldset>
-  </article>
-
-  <article>
-    <h6>Passkeys</h6>
-    {% if not user.credentials %}
-    <i>No passkeys available</i>
-    {% endif %}
-    {% for credential in user.credentials %}
-    <fieldset>
-      {% if session["cred_id"] == credential.id|hex %}
-        <mark>{{ L["Signed in"] }}</mark>
-      {% endif %}
-      <div _="install inlineHtmxRename()"
-      contenteditable
-      data-patch-parameter="friendly_name"
-      spellcheck="false"
-      hx-disinherit="*"
-      hx-patch="/users/{{ user.id }}/credential/{{ credential.id|hex }}"
-      hx-trigger="editContent">
-        {{- credential.friendly_name -}}
-      </div>
-      <div>
-        <a href="#" class="{{ "color-red" if not credential.active else "color-green"}}"
+        {% for credential in user.credentials %}
+        <fieldset>
+          {% if session["cred_id"] == credential.id|hex %}
+            <mark>{{ L["Signed in"] }}</mark>
+          {% endif %}
+          <div _="install inlineHtmxRename()"
+          contenteditable
+          data-patch-parameter="friendly_name"
+          spellcheck="false"
+          hx-disinherit="*"
           hx-patch="/users/{{ user.id }}/credential/{{ credential.id|hex }}"
-          hx-vals='js:{"active": {{ "true" if not credential.active else "false"}}}'
-          hx-params="active">{{ L["Passkey disabled"] if not credential.active else L["Passkey enabled"] }}</a>
-        <a href="#" class="color-red"
-          hx-confirm="Delete passkey?"
-          _="install confirmButton"
-          hx-trigger="confirmedButton throttle:200ms"
-          hx-delete="/users/{{ user.id }}/credential/{{ credential.id|hex }}">{{ L["Remove"] }}</a>
-      </div>
-      <small>{{ L["Last sign in"] }}:
-        {% if credential.last_login %}
-        <span class="" value="{{ credential.last_login }}" _="init set dt to my @value js(dt) return new Date(dt).toLocaleString() end then put result into me"></span>
-        {% else %}-
-        {% endif %}
-      </small>
-    </fieldset>
-    <hr>
-    {% endfor %}
-  </article>
+          hx-trigger="editContent">
+            {{- credential.friendly_name -}}
+          </div>
+          <div>
+            <a href="#" class="{{ "color-red" if not credential.active else "color-green"}}"
+              hx-patch="/users/{{ user.id }}/credential/{{ credential.id|hex }}"
+              hx-vals='js:{"active": {{ "true" if not credential.active else "false"}}}'
+              hx-params="active">{{ L["Passkey disabled"] if not credential.active else L["Passkey enabled"] }}</a>
+            <a href="#" class="color-red"
+              hx-confirm="Delete passkey?"
+              _="install confirmButton"
+              hx-trigger="confirmedButton throttle:200ms"
+              hx-delete="/users/{{ user.id }}/credential/{{ credential.id|hex }}">{{ L["Remove"] }}</a>
+          </div>
+          <small>{{ L["Last sign in"] }}:
+            {% if credential.last_login %}
+            <span class="" value="{{ credential.last_login }}" _="init set dt to my @value js(dt) return new Date(dt).toLocaleString() end then put result into me"></span>
+            {% else %}-
+            {% endif %}
+          </small>
+        </fieldset>
+        <hr>
+        {% endfor %}
+      </article>
 
-  <article>
-    <h6>{{ L["Profile"] }}</h6>
-    {% with
-      schema=schemas.user_profile,
-      current_data=user.profile,
-      root_key="profile"
-    %}
-      {% include "includes/form_builder.html" %}
-    {% endwith %}
-  </article>
+      <button data-loading-disable data-loading-aria-busy type="submit">{{ L["Save"] }}</button>
+    </form>
 
-  <button data-loading-disable data-loading-aria-busy type="submit">{{ L["Save"] }}</button>
-</form>
+  </div>
+</section>
+
+{% endblock body %}
+
+

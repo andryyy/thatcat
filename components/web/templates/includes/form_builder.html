@@ -4,14 +4,13 @@ DATA FIELDS
   current_data: dict
   schema: BaseModel.model_json_schema()
   fields: Optional[list]                # An optional list of fields to enable
-  system_fields: Optional[list]         # An optional list of fields to disable when "system"
                                         # is not part of a user's ACL
   root_key: Optional[str]               # A string to encapsulate a name in,
                                         # i.e. a root_key "profile" for a field "email" becomes "profile.email"
 
 #}
 
-{% for k, v in schema.properties.items() if (k not in system_fields or "system" in session["acl"]) and (k in fields or not fields) %}
+{% for k, v in schema.properties.items() if (k in fields or not fields) %}
   {% set form_id = current_data._form_id ~ "-" ~ k %}
   {% set field_name = root_key ~ "." ~ k if root_key else k %}
 
@@ -77,7 +76,7 @@ DATA FIELDS
               <details class="dropdown" hx-disinherit="*">
                 <summary>{{ L["Projects"] }}</summary>
                 <ul dir="rtl" id="leaflet-additional-markers-{{ form_id }}">
-                {% set current_project = current_data.assigned_project or object.id|touuid %}
+                {% set current_project = current_data.assigned_project or object.id %}
                 {% for project_id, project_data in request.form_options.projects.items() if (project_data.permitted == True or project_id == current_project) and project_data.location._is_valid %}
                 <li>
                   <label>
@@ -236,6 +235,7 @@ DATA FIELDS
     </fieldset>
 
   {% elif (v.type == "users:multi" or v.type == "users") %}
+
     <fieldset data-loading-disable data-field-type="users">
       {% if not request.form_options.users %}
       <label for="{{ form_id }}">{{ L[v.title] }}</label>
@@ -250,7 +250,7 @@ DATA FIELDS
         name="{{ field_name }}"
         id="{{ form_id }}">
         {% for user_id, user_data in request.form_options.users.items() %}
-          <option value="{{ user_id }}" {{ "selected" if user_id in current_data[k] }}>{{ user_data.name }}</option>
+          <option value="{{ user_id }}" {{ "selected" if user_id in current_data[k] }}>{{ user_data.login }}</option>
         {% endfor %}
       </select>
       {% if v.description %}

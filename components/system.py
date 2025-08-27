@@ -1,7 +1,6 @@
 import os
 import glob
 from components.models.system import SystemSettingsBase
-from components.database import TinyDB, TINYDB_PARAMS
 
 
 async def get_system_settings():

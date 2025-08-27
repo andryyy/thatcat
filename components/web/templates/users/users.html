@@ -5,21 +5,21 @@
 {% block breadcrumb %}
 <nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
   <ul>
-    <li><span>System</span></li>
-    <li><a href="#" hx-target="#body-main" hx-get="{{ request.path }}">Benutzer</a></li>
+    <li><span>{{ L["System"] }}</span></li>
+    <li><a href="#" hx-target="#body-main" hx-get="{{ request.path }}">{{ L["Users"] }}</a></li>
   </ul>
 </nav>
 {% endblock breadcrumb %}
 
 {% block body %}
 
-<h5>Benutzer</h5>
+<h5>{{ L["Users"] }}</h5>
 
 <section class="grid split-grid">
   <article class="hide-below-lg">
     <hgroup>
-      <h6>Benutzerübersicht</h6>
-      <p>In dieser Übersicht sind System Bentzer einsehbar und veränderbar.</p>
+      <h6>{{ L["Manage users"] }}</h6>
+      <p>{{ L["Manage system users"] }}</p>
     </hgroup>
   </article>
   <div id="system-users-full-table">

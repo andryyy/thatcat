@@ -1,6 +1,5 @@
 import asyncio
 import socket
-
 from config import defaults
 from components.cluster.ssl import get_ssl_context
 from components.logs import logger
@@ -16,6 +15,7 @@ from components.utils import ensure_list
 class Peers:
     def __init__(self):
         self.remotes = dict()
+        self._first_complete = asyncio.Event()
 
         for peer in defaults.CLUSTER_PEERS:
             peer = RemotePeer(**peer)
@@ -89,7 +89,7 @@ class Peers:
     ):
         peers = []
         for peer, peer_data in self.remotes.items():
-            if peer_data.healthy == True:
+            if peer_data._full_first_contact:
                 if names_only:
                     peers.append(peer_data.name)
                 else:

@@ -29,7 +29,7 @@ class CritErrors(Enum):
     LOCK_ERROR = "CRIT:LOCK_ERROR"
     NOT_READY = "CRIT:NOT_READY"
     NOTHING_TO_COMMIT = "CRIT:NOTHING_TO_COMMIT"
-    PATCH_EXCEPTION = "CRIT:PATCH_EXCEPTION"
+    SYNC_ERROR = "CRIT:SYNC_ERROR"
     PEERS_MISMATCH = "CRIT:PEERS_MISMATCH"
     START_BEHIND_FILE_END = "CRIT:START_BEHIND_FILE_END"
     TABLE_HASH_MISMATCH = "CRIT:TABLE_HASH_MISMATCH"
@@ -138,13 +138,13 @@ class RemotePeer(BaseModel):
 
     @computed_field
     @property
-    def healthy(self) -> str:
+    def _full_first_contact(self) -> str:
         if (
             self.streams.egress
             and self.streams.ingress
-            and self.cluster
             and self.started
-            and self.leader
+            and self.cluster  # may also return ?CONFUSED
+            and self.leader  # may also return ?CONFUSED
         ):
             return True
         return False

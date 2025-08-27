@@ -2,7 +2,8 @@ import logging
 import json
 import traceback
 from logging.handlers import RotatingFileHandler
-from components.utils.datetimes import datetime, timedelta
+from datetime import datetime, timedelta
+
 
 SUCCESS_LEVEL = 25
 CRITICAL_LEVEL = 50

@@ -1,9 +1,7 @@
 <form class="create-object" hx-trigger="submit throttle:200ms" hx-post="/objects/cars">
   {% with
     schema=schemas[request.view_args.object_type],
-    system_fields=system_fields[request.view_args.object_type],
     current_data={},
-    root_key="details",
     fields=["vin", "assigned_project"]
   %}
     {% include "includes/form_builder.html" %}

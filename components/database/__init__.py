@@ -1,14 +1,5 @@
-from .database import *
-from .states import STATE
+from .database import Database
+from components.cluster import cluster
 
-__all__ = [
-    "TinyDB",
-    "Query",
-    "Document",
-    "TINYDB_PARAMS",
-    "CTX_LOCK_ID",
-    "dbcommit",
-    "STATE",
-    "Q",
-    "dbparams",
-]
+db = Database(base="database", main_file="main.json", codec="msgpack")
+db.set_cluster(cluster, replicate_changes=True)

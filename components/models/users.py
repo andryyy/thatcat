@@ -32,11 +32,11 @@ class Vault(BaseModel):
 
 class TokenConfirmation(BaseModel):
     confirmation_code: Annotated[int, AfterValidator(lambda i: "%06d" % i)]
-    token: str = constr(strip_whitespace=True, min_length=14, max_length=14)
+    token: constr(strip_whitespace=True, min_length=14, max_length=14)
 
 
 class Auth(BaseModel):
-    login: str = constr(strip_whitespace=True, min_length=1)
+    login: constr(strip_whitespace=True, min_length=1)
 
     @computed_field
     @cached_property
@@ -150,13 +150,14 @@ class CredentialAdd(BaseModel):
 
 
 class User(BaseModel):
+    _doc_version: int = 0
     id: Annotated[str, AfterValidator(lambda v: str(UUID(v)))]
     login: constr(strip_whitespace=True, min_length=1)
     credentials: list[Credential | CredentialAdd] = []
     acl: list
     groups: Annotated[
         constr(strip_whitespace=True, min_length=1)
-        | list[constr(strip_whitespace=True, min_length=1)],
+        | list[constr(strip_whitespace=True, min_length=1) | None],
         AfterValidator(lambda v: ensure_list(v)),
     ] = []
     profile: UserProfile
@@ -175,7 +176,7 @@ class UserGroups(BaseModel):
 
 
 class UserAdd(BaseModel):
-    login: str = constr(strip_whitespace=True, min_length=1)
+    login: constr(strip_whitespace=True, min_length=1)
     credentials: list[str] = []
     acl: Annotated[
         Literal[*USER_ACLS] | list[Literal[*USER_ACLS]],
@@ -283,3 +284,20 @@ class UserSession(BaseModel):
     profile: dict | UserProfile | None = {}
     login_ts: float = Field(default_factory=ntime_utc_now)
     callbacks: list = []
+
+
+class ListRowUser(BaseModel):
+    id: Annotated[UUID | str, AfterValidator(lambda v: str(UUID(v)))]
+    created: str
+    updated: str
+    login: constr(strip_whitespace=True, min_length=1)
+    groups: Annotated[
+        constr(strip_whitespace=True, min_length=1)
+        | list[constr(strip_whitespace=True, min_length=1) | None],
+        AfterValidator(lambda v: ensure_list(v)),
+    ] = []
+
+    @computed_field
+    @property
+    def name(self) -> str:
+        return self.login

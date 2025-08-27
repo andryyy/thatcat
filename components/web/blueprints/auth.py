@@ -9,10 +9,10 @@ from components.models.users import (
     TokenConfirmation,
     TypeAdapter,
     UserSession,
+    User,
 )
 from components.logs import logger
-from components.utils import expire_key
-from components.utils.datetimes import utc_now_as_str
+from components.utils import expire_key, deep_model_dump, utc_now_as_str
 from components.web.utils import *
 from components.web.utils.passkeys import *
 from secrets import token_urlsafe
@@ -324,18 +324,30 @@ async def auth_login_verify():
         if not login_opts:
             return L["Timeout exceeded"], 409
 
-        credential_raw_id = b64url_decode(auth_response["rawId"])
+        credential_id = b64url_decode(auth_response["rawId"])
         user_id = b64url_decode(auth_response["response"]["userHandle"]).decode("utf-8")
-        user = await components.users.get(user_id=user_id)
+
+        async with db:
+            user = await db.search(
+                "users",
+                {
+                    "credentials.id": credential_id.hex(),
+                    "id": user_id,
+                },
+            )
+            if not user:
+                return L["Unknown passkey"], 409
+
+            user = User.model_validate(user[0])
 
         for credential in user.credentials:
-            if credential.id == credential_raw_id:
+            if credential.id == credential_id:
                 if credential.active == False:
                     return L["Passkey is disabled"], 409
                 matched_user_credential = credential
                 break
         else:
-            return L["No such passkey"], 409
+            return L["Unknown passkey"], 409
 
         verification = verify_authentication_response(
             assertion_response=auth_response,
@@ -347,16 +359,16 @@ async def auth_login_verify():
         if not user.active:
             return L["User is not allowed to login"], 409
 
-        matched_user_credential.last_login = utc_now_as_str()
-        if verification["counter_supported"] != 0:
-            matched_user_credential.sign_count = verification["sign_count"]
+        async with db:
+            for credential in user.credentials:
+                if credential.id == credential_id:
+                    credential.last_login = utc_now_as_str()
+                    if verification["counter_supported"] != 0:
+                        matched_user_credential.sign_count = verification["sign_count"]
+                    break
 
-        async with ClusterLock("users"):
-            await components.users.patch_credential(
-                user_id=user_id,
-                hex_id=credential_raw_id.hex(),
-                data=matched_user_credential.model_dump(mode="json"),
-            )
+            user_dict = deep_model_dump(user)
+            await db.patch("users", user_id, {"credentials": user_dict["credentials"]})
 
     except Exception as e:
         logger.critical(e)
@@ -390,7 +402,7 @@ async def auth_login_verify():
             login=user.login,
             id=user.id,
             acl=user.acl,
-            cred_id=credential_raw_id.hex(),
+            cred_id=credential_id.hex(),
             lang=request.accept_languages.best_match(defaults.ACCEPT_LANGUAGES),
             profile=user.profile,
         )

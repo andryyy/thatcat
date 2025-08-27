@@ -1,8 +1,6 @@
-import components.users
-
-from components.models.users import UserProfile
+from components.models.users import User, UserProfile, UserProfilePatch
 from components.web.utils import *
-from components.utils.files import sync_folder
+from components.utils import deep_model_dump
 
 blueprint = Blueprint("profile", __name__, url_prefix="/profile")
 
@@ -26,7 +24,11 @@ def load_context():
 @acl("any")
 async def user_profile_get():
     try:
-        user = await components.users.get(user_id=session["id"])
+        async with db:
+            user_doc = await db.get("users", session["id"])
+            user_doc_version = await db.doc_version("users", session["id"])
+            user = User.model_validate(user_doc)
+            user._doc_version = user_doc_version
     except ValidationError:
         session_clear()
         return redirect(url_for("root.root"))
@@ -37,14 +39,22 @@ async def user_profile_get():
 @blueprint.route("/edit", methods=["PATCH"])
 @acl("any")
 async def user_profile_patch():
-    async with ClusterLock("users"):
-        await components.users.patch_profile(
-            user_id=session["id"], data=request.form_parsed
-        )
+    try:
+        viewer_doc_version = int(request.args.get("doc_version", -1))
+    except:
+        viewer_doc_version = -1
 
-    user = await components.users.get(user_id=session["id"])
+    async with db:
+        user_profile_model = UserProfilePatch.model_validate(request.form_parsed)
+        patch_data = deep_model_dump(user_profile_model)
+        if viewer_doc_version != -1:
+            if await db.doc_version("users", session["id"]) > viewer_doc_version:
+                raise ValueError("", L["Document changed, please reload the form"])
+
+        await db.patch("users", session["id"], {"profile": patch_data})
+
     session.pop("profile", None)
-    session["profile"] = user.profile.dict()
+    session["profile"] = patch_data
 
     return trigger_notification(
         level="success",

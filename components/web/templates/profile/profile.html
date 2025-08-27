@@ -15,17 +15,27 @@
 
 <h5>{{ L["My data"] }}</h5>
 
-<article hx-trigger="htmx:afterRequest[event.detail.successful==true] from:#profile-form" hx-select="#profile-form" hx-get="/profile/" hx-target="#profile-form" hx-swap="outerHTML">
-  <h6>{{ L["Profile"] }}</h6>
-  <form hx-trigger="submit throttle:1s" hx-patch="/profile/edit" id="profile-form">
-    {% with
-      schema=schemas.user_profile,
-      current_data=user.profile
-    %}
-      {% include "includes/form_builder.html" %}
-    {% endwith %}
-    <button data-loading-disable data-loading-aria-busy type="submit">{{ L["Save"] }}</button>
-  </form>
+<article
+  id="profile-container"
+  hx-trigger="reloadProfile"
+  hx-select="#profile-form"
+  hx-get="/profile/"
+  hx-target="#profile-form"
+  hx-swap="outerHTML">
+    <h6>{{ L["Profile"] }}</h6>
+    <form
+      _="on htmx:afterRequest[event.detail.successful==true] from me trigger reloadProfile on #profile-container"
+      id="profile-form"
+      hx-trigger="submit throttle:1s"
+      hx-patch="/profile/edit?doc_version={{ user._doc_version }}">
+      {% with
+        schema=schemas.user_profile,
+        current_data=user.profile
+      %}
+        {% include "includes/form_builder.html" %}
+      {% endwith %}
+      <button data-loading-disable data-loading-aria-busy type="submit">{{ L["Save"] }}</button>
+    </form>
 </article>
 
 <section id="profile-passkeys">

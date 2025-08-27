@@ -1,11 +1,8 @@
 import asyncio
 import re
-from components.database import *
-from components.database import LRUCache
 from components.logs import logger
 from components.models.objects import *
-from components.utils import ensure_list, merge_models, batch
-from components.utils.osm import coords_to_display_name
+from components.utils import ensure_list, merge_models, batch, coords_to_display_name
 from components.web.utils.quart import current_app, session
 
 BACKGROUND_TASKS = set()

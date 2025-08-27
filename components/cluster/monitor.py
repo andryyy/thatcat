@@ -20,11 +20,12 @@ class Monitor:
             await asyncio.sleep(1)
             c += 1
 
-            if (
-                not self.cluster.peers.local.leader
-                or not self.cluster.peers.local.cluster_complete
-            ):
-                if self.cluster.peers.local.leader and c % 4:
+            if not self.cluster.peers.local.cluster_complete:
+                if (
+                    self.cluster.peers._first_complete.is_set()
+                    and self.cluster.peers.local.leader
+                    and c % 4
+                ):
                     continue
 
                 try:

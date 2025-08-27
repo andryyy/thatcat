@@ -36,6 +36,7 @@ behavior selectFromLeaflet(formId, options)
   end
 
   on keydown[keyCode == 13] from #{'leaflet-search-query-' + formId} throttled at 1s
+    halt the event's bubbling
     set searchQuery to event.target's value
     if searchQuery
       fetch `/location/search/${searchQuery}` with method:'GET', headers:{content-type:'application/json'}

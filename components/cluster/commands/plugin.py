@@ -15,7 +15,7 @@ def pre_dispatch(fn):
         if not any(
             map(
                 lambda s: data.cmd.startswith(s),
-                ["ACK", "STATUS", "FULLTABLE", "INIT", "BYE"],
+                ["ACK", "STATUS", "INIT", "BYE"],
             )
         ):
             if not cluster.peers.local.leader:

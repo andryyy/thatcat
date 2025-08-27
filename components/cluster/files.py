@@ -1,10 +1,12 @@
+import asyncio
+import glob
 import base64
 import os
 import zlib
 
 from .exceptions import *
-from components.utils import is_path_within_cwd
-from components.utils.files import apply_meta
+from components.logs import logger
+from components.utils import is_path_within_cwd, apply_meta
 from components.models import validate_call
 
 
@@ -105,3 +107,36 @@ class Files:
 
         except Exception as e:
             raise FilePutException(e)
+
+    async def sync_folder(self, folder: str, in_background: bool = True):
+        if not is_path_within_cwd(folder):
+            raise ValueError("Folder not within working directory")
+
+        sem = asyncio.Semaphore(20)
+
+        async def send_file_to_peer(peer, file):
+            try:
+                async with sem:
+                    await self.fileput(file, file, peer)
+            except FilePutException as e:
+                logger.warning(f"Cannot send to {peer}: {e}")
+
+        files = glob.glob(f"{folder}/*")
+        peers = list(self.cluster.peers.get_established())
+
+        if in_background:
+            for file in files:
+                for peer in peers:
+                    t = asyncio.create_task(send_file_to_peer(peer, file))
+                    t.add_done_callback(
+                        lambda _t: _t.exception() and logger.critical(_t.exception())
+                    )
+            return
+
+        tasks = [
+            asyncio.create_task(send_file_to_peer(peer, file))
+            for file in files
+            for peer in peers
+        ]
+
+        await asyncio.gather(*tasks, return_exceptions=False)

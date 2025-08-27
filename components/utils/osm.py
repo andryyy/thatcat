@@ -1,12 +1,12 @@
 import json
 from config.defaults import OSM_EMAIL, HOSTNAME
-from components.database import STATE
 from components.models.coords import Literal, Location, validate_call
+from .requests import async_request
 
 
 @validate_call
 async def coords_to_display_name(coords: str):
-    from components.utils.requests import async_request
+    from components.database.states import STATE
 
     location = Location.from_coords(coords)
 
@@ -32,7 +32,7 @@ async def coords_to_display_name(coords: str):
 
 @validate_call
 async def display_name_to_location(q: str):
-    from components.utils.requests import async_request
+    from components.database.states import STATE
 
     if q in STATE.locations:
         return STATE.locations[q]

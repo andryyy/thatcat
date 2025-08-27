@@ -5,23 +5,23 @@
 {% block breadcrumb %}
 <nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
   <ul>
-    <li><span>Objekte</span></li>
-    <li><a href="#" hx-target="#body-main" hx-get="/objects">Kategorien</a></li>
-    <li><a href="#" hx-target="#body-main" hx-get="{{ request.path }}">{{ request.view_args.get("object_type")|capitalize }}</a></li>
+    <li><span>{{ L["Objects"] }}</span></li>
+    <li><a href="#" hx-target="#body-main" hx-get="/objects">{{ L["Categories"] }}</a></li>
+    <li><a href="#" hx-target="#body-main" hx-get="{{ request.path }}">{{ L[request.view_args.get("object_type")|capitalize] }}</a></li>
   </ul>
 </nav>
 {% endblock breadcrumb %}
 
 {% block body %}
 
-<h5>{{ request.view_args.get("object_type")|capitalize }} verwalten</h5>
+<h5>{{ L[request.view_args.get("object_type")|capitalize] }}</h5>
 
 <details class="show-below-lg">
-  <summary>Hinzufügen</summary>
+  <summary>{{ L["Create"] }}</summary>
   <article>
     <hgroup>
-      <h6>Neues Objekt hinzufügen</h6>
-      <p>Erstelle ein neues Objekt mit einem eindeutigen Namen.</p>
+      <h6>{{ L["Create a new object"] }}</h6>
+      <p>{{ L["Create a new object using the form below"] }}</p>
     </hgroup>
     {% include "objects/includes/create/" ~ request.view_args.get("object_type") ~ ".html" %}
   </article>
@@ -30,8 +30,8 @@
 <section class="grid split-grid">
   <article class="hide-below-lg">
     <hgroup>
-      <h6>Neues Objekt hinzufügen</h6>
-      <p>Erstelle ein neues Objekt mit einem eindeutigen Namen.</p>
+      <h6>{{ L["Create a new object"] }}</h6>
+      <p>{{ L["Create a new object using the form below"] }}</p>
     </hgroup>
     {% include "objects/includes/create/" ~ request.view_args.get("object_type") ~ ".html" %}
   </article>

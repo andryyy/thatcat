@@ -7,7 +7,7 @@ from .utils.utils import parse_form_to_dict, ws_htmx
 from .utils.notifications import trigger_notification, validation_error
 
 from components.cluster.exceptions import ClusterException
-from components.database import STATE
+from components.database.states import STATE
 from components.models import UUID, ValidationError
 from components.logs import logger
 from components.utils import deep_model_dump, ensure_list, merge_deep
@@ -44,7 +44,9 @@ modifying_request_limiter = asyncio.Semaphore(app.config["MOD_REQ_LIMIT"])
 async def handle_validation_error(error):
     if isinstance(error.args, tuple):
         name, message = error.args
-        return validation_error([{"loc": [name], "msg": message}])
+        return validation_error(
+            [{"loc": (loc,), "msg": message} for loc in ensure_list(name) or "_"]
+        )
     return validation_error([{"loc": [""], "msg": str(error)}])
 
 

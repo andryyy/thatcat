@@ -1,6 +1,4 @@
-import components.users
-
-from components.models.users import USER_ACLS, UserProfile
+from components.models.users import USER_ACLS, UserProfile, ListRowUser, User
 from components.utils import batch, ensure_list
 from components.web.utils import *
 
@@ -31,8 +29,21 @@ def load_context():
 @blueprint.route("/<user_id>")
 @acl("system")
 async def get_user(user_id: str):
-    user = await components.users.get(user_id=user_id)
-    return await render_or_json("users/includes/row.html", request.headers, user=user)
+    async with db:
+        user = await db.get("users", user_id)
+        if user:
+            user = User.model_validate(user)
+        else:
+            if "Hx-Request" in request.headers:
+                return trigger_notification(
+                    level="error",
+                    response_code=409,
+                    title=L["User error"],
+                    message=L["User is unknown"],
+                )
+            abort(404)
+
+    return await render_or_json("users/user.html", request.headers, user=user)
 
 
 @blueprint.route("/")
@@ -45,24 +56,26 @@ async def get_users():
             request.form_parsed, "users", default_sort_attr="login"
         )
 
-        users, pagination = await components.users.search(
-            name=q,
-            pagination={
-                "page": page,
-                "page_size": page_size,
-                "sort_attr": sort_attr,
-                "sort_reverse": sort_reverse,
-            },
-        )
+        async with db:
+            rows = await db.list_rows(
+                "users",
+                page=page,
+                page_size=page_size,
+                sort_attr=sort_attr,
+                q=q,
+                any_of=[filters],
+                sort_reverse=sort_reverse,
+            )
 
-        return await render_template(
+        return await render_or_json(
             "users/includes/table_body.html",
+            request.headers,
             data={
-                "users": users,
-                "page_size": page_size,
-                "page": page,
-                "pages": pagination.pages,
-                "elements": pagination.elements,
+                "users": [ListRowUser.model_validate(row) for row in rows["items"]],
+                "page_size": rows["page_size"],
+                "page": rows["page"],
+                "pages": rows["total_pages"],
+                "elements": rows["total"],
             },
         )
     else:

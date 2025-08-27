@@ -5,18 +5,18 @@
 {% block breadcrumb %}
 <nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
   <ul>
-    <li><span>Objects</span></li>
-    <li><a href="#" hx-target="#body-main" hx-get="/objects">Kategorien</a></li>
+    <li><span>{{ L["Objects"] }}</span></li>
+    <li><a href="#" hx-target="#body-main" hx-get="/objects">{{ L["Categories"] }}</a></li>
   </ul>
 </nav>
 {% endblock breadcrumb %}
 
 {% block body %}
 <article>
-  <p>Folgende Kategorien stehen zur Auswahl:</p>
+  <p>{{ L["Select from a category"] }}:</p>
   <ul hx-push-url="true">
   {% for object_type in object_types %}
-    <li><a href="#" hx-target="#body-main" hx-get="/objects/{{ object_type }}">{{ object_type|capitalize }}</a></li>
+    <li><a href="#" hx-target="#body-main" hx-get="/objects/{{ object_type }}">{{ L[object_type|capitalize] }}</a></li>
   {% endfor %}
   </ul>
 </article>

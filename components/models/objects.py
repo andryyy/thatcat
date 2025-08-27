@@ -14,7 +14,7 @@ class ObjectPagination(BaseModel):
     elements: int = 0
 
 
-class ObjectProject(BaseModel):
+class ObjectProjectForm(BaseModel):
     _form_id: str = PrivateAttr(default=f"form-{str(uuid4())}")
 
     name: constr(min_length=1) = Field(
@@ -27,6 +27,7 @@ class ObjectProject(BaseModel):
     )
 
     location: Location | None = Field(
+        default=None,
         json_schema_extra={
             "title": "Standort",
             "type": "location",
@@ -42,6 +43,7 @@ class ObjectProject(BaseModel):
     )
 
     notes: str | None = Field(
+        default=None,
         json_schema_extra={
             "title": "Notizen",
             "description": "Weitere Informationen; Freitext",
@@ -60,25 +62,7 @@ class ObjectProject(BaseModel):
     )
 
 
-class ObjectProjectOptional(ObjectProject):
-    name: constr(min_length=1) | None = None
-    location: Location | None = None
-    notes: str | None = None
-    assigned_users: UUID | list[UUID] | None = None
-
-    @field_validator("assigned_users")
-    def assigned_users_validator(cls, v):
-        if v is not None:
-            return list(set(ensure_list(v)))
-        return v
-
-
-class ObjectProjectMinimal(ObjectProjectOptional):
-    name: constr(min_length=1)
-    assigned_users: UUID | list[UUID]
-
-
-class ObjectCar(BaseModel):
+class ObjectCarForm(BaseModel):
     _form_id: str = PrivateAttr(default=f"form-{str(uuid4())}")
 
     vin: str = Field(
@@ -91,7 +75,7 @@ class ObjectCar(BaseModel):
     )
 
     vendor: str | None = Field(
-        default="",
+        default=None,
         json_schema_extra={
             "title": "Hersteller",
             "description": "Hersteller des Fahrzeugs",
@@ -101,7 +85,7 @@ class ObjectCar(BaseModel):
     )
 
     model: str | None = Field(
-        default="",
+        default=None,
         json_schema_extra={
             "title": "Modell",
             "description": "Modellbezeichnung des Herstellers",
@@ -111,6 +95,7 @@ class ObjectCar(BaseModel):
     )
 
     year: int | None = Field(
+        default=None,
         json_schema_extra={
             "title": "Baujahr",
             "description": "Baujahr des Fahrzeugs",
@@ -129,6 +114,7 @@ class ObjectCar(BaseModel):
     )
 
     location: Location | None = Field(
+        default=None,
         json_schema_extra={
             "title": "Standort",
             "type": "location",
@@ -136,6 +122,7 @@ class ObjectCar(BaseModel):
     )
 
     notes: str | None = Field(
+        default=None,
         json_schema_extra={
             "title": "Notizen",
             "description": "Weitere Informationen; Freitext",
@@ -145,6 +132,7 @@ class ObjectCar(BaseModel):
     )
 
     assets: list[Asset] | None = Field(
+        default=None,
         json_schema_extra={
             "title": "Dateien",
             "description": "Zugehörige Dateien",
@@ -162,7 +150,35 @@ class ObjectCar(BaseModel):
     )
 
 
-class ObjectCarOptional(ObjectCar):
+class ObjectCar(ObjectCarForm):
+    id: Annotated[UUID | str, AfterValidator(lambda v: str(UUID(v)))]
+    created: str
+    updated: str
+
+    @computed_field
+    @property
+    def name(self) -> str:
+        return self.vin
+
+
+class ObjectListRowCar(ObjectCar):
+    vin: constr(
+        to_upper=True,
+        strip_whitespace=True,
+        min_length=17,
+        max_length=17,
+        pattern=r"([A-HJ-NPR-Z0-9]{17})",
+    )
+    assigned_project: UUID
+    assigned_users: UUID | list[UUID]
+    permitted: bool = False
+
+    @field_validator("assigned_users")
+    def assigned_users_validator(cls, v):
+        return list(set(ensure_list(v)))
+
+
+class ObjectCarOptional(ObjectCarForm):
     vin: constr(
         to_upper=True,
         strip_whitespace=True,
@@ -212,6 +228,15 @@ class ObjectCarOptional(ObjectCar):
         return v
 
 
+class ObjectPatchCar(ObjectCarOptional):
+    model_config = ConfigDict(validate_assignment=True)
+
+    @computed_field
+    @property
+    def updated(self) -> str:
+        return utc_now_as_str()
+
+
 class ObjectCarMinimal(ObjectCarOptional):
     vin: constr(
         to_upper=True,
@@ -225,31 +250,7 @@ class ObjectCarMinimal(ObjectCarOptional):
     assigned_users: UUID | list[UUID]
 
 
-class ObjectBase(BaseModel):
-    id: Annotated[UUID | str, AfterValidator(lambda v: str(UUID(v)))]
-    created: str
-    updated: str
-
-
-class ObjectBaseProject(ObjectBase):
-    details: ObjectProject
-
-    @computed_field(title="name")
-    @property
-    def name(self) -> str:
-        return self.details.name
-
-
-class ObjectBaseCar(ObjectBase):
-    details: ObjectCar
-
-    @computed_field(title="vin")
-    @property
-    def name(self) -> str:
-        return self.details.vin
-
-
-class ObjectAdd(BaseModel):
+class ObjectAddCar(ObjectCarMinimal):
     @computed_field
     @cached_property
     def id(self) -> str:
@@ -266,15 +267,38 @@ class ObjectAdd(BaseModel):
         return utc_now_as_str()
 
 
-class ObjectAddProject(ObjectAdd):
-    details: ObjectProjectMinimal
+class ObjectProject(ObjectProjectForm):
+    id: Annotated[UUID | str, AfterValidator(lambda v: str(UUID(v)))]
+    created: str
+    updated: str
 
 
-class ObjectAddCar(ObjectAdd):
-    details: ObjectCarMinimal
+class ObjectListRowProject(ObjectProject):
+    name: constr(min_length=1)
+    location: Location | None
+    assigned_users: UUID | list[UUID]
+    radius: int | None = 100
+    permitted: bool = False
+
+    @field_validator("assigned_users")
+    def assigned_users_validator(cls, v):
+        return list(set(ensure_list(v)))
 
 
-class ObjectPatch(BaseModel):
+class ObjectProjectOptional(ObjectProjectForm):
+    name: constr(min_length=1) | None = None
+    location: Location | None = None
+    notes: str | None = None
+    assigned_users: UUID | list[UUID] | None = None
+
+    @field_validator("assigned_users")
+    def assigned_users_validator(cls, v):
+        if v is not None:
+            return list(set(ensure_list(v)))
+        return v
+
+
+class ObjectPatchProject(ObjectProjectOptional):
     model_config = ConfigDict(validate_assignment=True)
 
     @computed_field
@@ -283,12 +307,26 @@ class ObjectPatch(BaseModel):
         return utc_now_as_str()
 
 
-class ObjectPatchProject(ObjectPatch):
-    details: ObjectProjectOptional
+class ObjectProjectMinimal(ObjectProjectOptional):
+    name: constr(min_length=1)
+    assigned_users: UUID | list[UUID]
 
 
-class ObjectPatchCar(ObjectPatch):
-    details: ObjectCarOptional
+class ObjectAddProject(ObjectProjectMinimal):
+    @computed_field
+    @cached_property
+    def id(self) -> str:
+        return str(uuid4())
+
+    @computed_field
+    @property
+    def created(self) -> str:
+        return utc_now_as_str()
+
+    @computed_field
+    @property
+    def updated(self) -> str:
+        return utc_now_as_str()
 
 
 model_classes = {
@@ -306,22 +344,12 @@ model_classes = {
         "projects": ObjectAddProject,
     },
     "base": {
-        "cars": ObjectBaseCar,
-        "projects": ObjectBaseProject,
+        "cars": ObjectCar,
+        "projects": ObjectProject,
     },
-    "searchables": {
-        "cars": ["vin", "make", "model"],
-        "projects": ["name"],
-    },
-    "filterables": {
-        "cars": {
-            "list": ["assigned_users"],
-            "str": ["vin", "assigned_project"],
-        },
-        "projects": {
-            "list": ["assigned_users"],
-            "str": ["name"],
-        },
+    "list_row": {
+        "cars": ObjectListRowCar,
+        "projects": ObjectListRowProject,
     },
     "unique_fields": {  # str only
         "cars": ["vin", "assigned_project"],

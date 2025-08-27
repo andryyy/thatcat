@@ -101,7 +101,6 @@ def validation_error(
             "error_msgs": error_msgs,
         }
     )
-
     return (
         "",
         response_code,
