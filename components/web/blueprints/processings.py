@@ -1,25 +1,17 @@
 import asyncio
 import json
 import os
-import components.processings
-from components.models.processings import CompleteProcessingRequest
-from components.utils.assets import remove_asset
-from components.web.utils import *
+from components.processings import process_image
+from components.models.processings import Processing
+from ..utils import *
 
 blueprint = Blueprint("processings", __name__, url_prefix="/processings")
-
-
-@blueprint.before_request
-async def before_request():
-    global L
-    L = LANG[request.USER_LANG]
 
 
 @blueprint.context_processor
 async def load_context():
     return {
         "QUEUED_USER_TASKS": STATE.queued_user_tasks.get(session["id"], []),
-        "L": L,
     }
 
 
@@ -27,8 +19,26 @@ async def load_context():
 @acl(["user"])
 @formoptions(["projects"])
 async def get_incomplete():
-    return await render_template(
-        "processings/processings.html", processings=await components.processings.all()
+    async with db:
+        rows = await db.list_rows(
+            "processings",
+            page=1,
+            page_size=-1,
+            sort_attr="created",
+            q="",
+            sort_reverse=False,
+            where={"assigned_user": session["id"]}
+            if not "system" in session["acl"]
+            else None,
+            prefer_indexed=True,
+        )
+
+        rows["items"] = [
+            await db.get("processings", item["id"]) for item in rows["items"]
+        ]
+
+    return await render_or_json(
+        "processings/processings.html", request.headers, data=rows
     )
 
 
@@ -36,50 +46,54 @@ async def get_incomplete():
 @acl(["user"])
 @formoptions(["projects"])
 async def get_processing(processing_id):
-    processing = await components.processings.get(processing_id)
+    async with db:
+        processing = await db.get("processings", processing_id)
     if not processing:
         return trigger_notification(
             level="error",
             response_code=404,
-            title="Vorgang unbekannt",
-            message=f"Vorgang {processing_id} nicht gefunden",
+            title="Processing unknown",
+            message="Processing not found",
         )
 
-    return await render_template(
-        "processings/processings.html", processings=[processing]
-    )
+    return await render_template("processings/processing.html", processing=processing)
 
 
 @blueprint.route("/processing/finalize", methods=["POST"])
 @acl(["user"])
 async def finalize_processing():
-    processing_data = CompleteProcessingRequest.model_validate(request.form_parsed)
-    processing_item = await components.processings.get(processing_data.id)
+    async with db:
+        processing = await db.get("processings", request.form_parsed["id"])
 
-    if not processing_item:
+    if not processing:
         return trigger_notification(
             level="error",
             response_code=404,
-            title="Vorgang unbekannt",
-            message=f"Vorgang {processing_id} nicht gefunden",
+            title="Processing unknown",
+            message="Processing not found",
         )
 
-    async with ClusterLock("processing"):
-        await components.processings.delete(processing_data.id)
+    processing_data = Processing(**processing)
 
-    if processing_data.reason == "abort":
-        for asset in processing_item["assets"]:
-            await remove_asset(cluster, asset["id"])
+    async with db:
+        await db.delete("processings", processing_data.id)
+
+    if request.form_parsed["reason"] == "abort":
+        for asset in processing_data.assets:
+            for peer in cluster.peers.get_established():
+                await cluster.files.filedel(f"assets/{asset.id}", peer)
+                if os.path.exists(f"assets/{asset.id}"):
+                    os.remove(f"assets/{asset.id}")
 
         return trigger_notification(
             level="success",
             response_code=204,
-            title="Verarbeitung abgebrochen",
-            message="Das Objekt wurde verworfen",
+            title="Completed",
+            message="Processing removed",
             additional_triggers={"removeProcessing": processing_data.id},
         )
 
-    elif processing_data.reason == "completed":
+    elif request.form_parsed["reason"] == "completed":
         return (
             "",
             204,
@@ -114,10 +128,7 @@ async def process_upload():
 
         image_bytes = file.read()
         image_filename = file.filename
-
-        t = asyncio.create_task(
-            components.processings.process_image(image_bytes, image_filename)
-        )
+        t = asyncio.create_task(process_image(image_bytes, image_filename))
         STATE.queued_user_tasks[session["id"]].add(t)
         t.add_done_callback(STATE.queued_user_tasks[session["id"]].discard)
 

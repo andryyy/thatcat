@@ -1,32 +1,40 @@
-import os
-
-from components.models import *
-from components.utils.datetimes import ntime_utc_now, utc_now_as_str
+from dataclasses import dataclass
+from components.models.helpers import *
 
 
-class Location(BaseModel):
-    lat: float
-    lon: float
-    display_name: str
+@dataclass
+class Location:
+    lat: float | str
+    lon: float | str
+    display_name: str | None = None
 
-    @computed_field
     @property
     def coords(self) -> str:
-        return ",".join([str(self.lat), str(self.lon)])
-
-    @computed_field
-    @property
-    def _is_valid(self) -> bool:
-        return all(bool(l) for l in [self.lat, self.lon])
+        return f"{self.lat},{self.lon}"
 
     @classmethod
-    def from_coords(self, coords: str) -> "Coords":
+    def from_coords(cls, coords: str) -> "Location":
         try:
-            lat, lon = coords.split(",")
-            return self(lat=lat, lon=lon, display_name="")
-        except:
-            raise PydanticCustomError(
-                "coords",
-                "Ungültige Koordinaten",
-                dict(),
+            lat_str, lon_str = coords.split(",")
+            return cls(lat=float(lat_str), lon=float(lon_str), display_name="")
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"Invalid coordinate string: {coords}")
+
+    def __post_init__(self):
+        if not isinstance(self.lat, (float, str)) or str(self.lat) == "":
+            raise ValueError(
+                "lat",
+                f"'lat' must be a non-empty float or string, got {type(self.lat).__name__}",
             )
+
+        if not isinstance(self.lon, (float, str)) or str(self.lon) == "":
+            raise ValueError(
+                "lon",
+                f"'lon' must be a non-empty float or string, got {type(self.lon).__name__}",
+            )
+
+        if self.display_name is not None:
+            self.display_name = to_str(self.display_name.strip()) or None
+
+        self.lat = float(self.lat)
+        self.lon = float(self.lon)

@@ -20,14 +20,14 @@ TLS_KEYFILE = "system/certs/privkey.pem"
 TLS_CA = "/etc/ssl/certs/ca-certificates.crt"
 CLUSTER_PEERS = [
     {"name": "de.kerker.io", "ip4": "2.58.53.49", "nat_ip4": "45.86.125.5"},
-    {"name": "arm-2", "ip4": "37.27.93.56"},
+    {"name": "arm-2", "ip4": "37.27.93.56", "ip6": "2a01:4f9:c012:7d9d::1"},
     {"name": "4th", "ip4": "188.245.202.111"},
 ]
 CLUSTER_SELF = {
     "name": "debian-4gb-nbg1-2",
     "ip4": "162.55.49.111",
+    "ip6": "2a01:4f8:1c1c:72bd::1",
 }
 CLUSTER_CLI_BINDINGS = ["127.0.0.1", "::1"]
 CLUSTER_PEERS_TIMEOUT = 1.25
-CLUSTER_LOGS_REFRESH_AFTER = 120  # force refresh of remote logs after n seconds
 OSM_EMAIL = "andre.peters@debinux.de"

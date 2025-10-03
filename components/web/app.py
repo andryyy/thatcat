@@ -1,17 +1,13 @@
 import asyncio
 import json
+import random
+import string
 
 from .blueprints import *
-from .utils.quart import Quart, request, session
-from .utils.utils import parse_form_to_dict, ws_htmx
-from .utils.notifications import trigger_notification, validation_error
-
+from .utils import *
+from .utils.utils import build_nested_dict
 from components.cluster.exceptions import ClusterException
-from components.database.states import STATE
-from components.models import UUID, ValidationError
-from components.logs import logger
-from components.utils import deep_model_dump, ensure_list, merge_deep
-from components.utils.datetimes import ntime_utc_now
+from components.utils import ensure_list, LANG
 from config import defaults
 
 app = Quart(
@@ -40,9 +36,16 @@ app.config["MOD_REQ_LIMIT"] = 10
 modifying_request_limiter = asyncio.Semaphore(app.config["MOD_REQ_LIMIT"])
 
 
+def generate_form_id(from_key: str, length=8):
+    chars = string.ascii_lowercase + string.digits
+    random_part = "".join(random.choices(chars, k=length))
+    return f"form-{random_part}-{str(from_key)}"
+
+
 @app.errorhandler(ValueError)
-async def handle_validation_error(error):
-    if isinstance(error.args, tuple):
+@app.errorhandler(TypeError)
+async def handle_input_error(error):
+    if isinstance(error.args, tuple) and len(error.args) == 2:
         name, message = error.args
         return validation_error(
             [{"loc": (loc,), "msg": message} for loc in ensure_list(name) or "_"]
@@ -50,25 +53,12 @@ async def handle_validation_error(error):
     return validation_error([{"loc": [""], "msg": str(error)}])
 
 
-@app.errorhandler(ValidationError)
-async def handle_validation_error(error):
-    return validation_error(error.errors())
-
-
 @app.errorhandler(ClusterException)
 async def handle_cluster_error(error):
     await ws_htmx(
         "system",
         "beforeend",
-        """<div hidden _="on load trigger
-            notification(
-            title: 'Cluster error',
-            level: 'system',
-            message: '{error}',
-            duration: 10000
-            )"></div>""".format(
-            error=str(error)
-        ),
+        f"<div hidden _=\"on load trigger notification(title: 'Cluster error', level: 'system', message: '{str(error)}', duration: 10000)\"></div>",
     )
     return trigger_notification(
         level="error",
@@ -99,18 +89,7 @@ async def before_request():
     if request.method in ["POST", "PATCH", "PUT", "DELETE"]:
         await modifying_request_limiter.acquire()
         form = await request.form
-        request.form_parsed = dict()
-        if form:
-            for k in form:
-                v = form.getlist(k)
-                if len(v) == 1:
-                    request.form_parsed = merge_deep(
-                        request.form_parsed, parse_form_to_dict(k, v.pop())
-                    )
-                else:
-                    request.form_parsed = merge_deep(
-                        request.form_parsed, parse_form_to_dict(k, v)
-                    )
+        request.form_parsed = build_nested_dict(form)
 
 
 @app.teardown_request
@@ -120,17 +99,14 @@ async def teardown_request(exc):
 
 @app.context_processor
 def load_defaults():
-    _defaults = {
+    context = {
         k: v
         for k, v in defaults.__dict__.items()
         if not (k.startswith("__") or k.startswith("_"))
     }
-    return _defaults
-
-
-@app.template_filter(name="hex")
-def to_hex(value):
-    return value.hex()
+    context["L"] = LANG[request.USER_LANG]
+    context["generate_form_id"] = generate_form_id
+    return context
 
 
 @app.template_filter(name="ensurelist")
@@ -141,13 +117,3 @@ def ensurelist(value):
 @app.template_filter(name="toprettyjson")
 def to_prettyjson(value):
     return json.dumps(value, sort_keys=True, indent=2, separators=(",", ": "))
-
-
-@app.template_filter("tojson")
-def to_json(value):
-    return json.dumps(deep_model_dump(value))
-
-
-@app.template_filter("touuid")
-def str_to_uuid(value):
-    return UUID(value)

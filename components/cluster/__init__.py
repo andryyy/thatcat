@@ -1,21 +1,21 @@
+from .commands import CommandRegistry
+from .commands.responses import OkCommand, ErrCommand, DataCommand
+from .commands.db import SyncCommand
+from .commands.files import FileDelCommand, FileGetCommand, FilePutCommand
+from .commands.locking import LockCommand, UnlockCommand
+from .commands.status import ByeCommand, InitCommand, StatusCommand
 from .files import Files
 from .monitor import Monitor
 from .peers import Peers
 from .server import Server
-from .commands import CommandRegistry
-from .commands.ack import AckCommand
-from .commands.data import DataCommand
-from .commands.locking import LockCommand, UnlockCommand
-from .commands.files import FileDelCommand, FilePutCommand, FileGetCommand
-from .commands.status import StatusCommand, InitCommand, ByeCommand
-from .commands.db import SyncCommand
 
 cluster = Server(port=2102)
-cluster.peers = Peers()
+cluster.peers = Peers(cluster)
 cluster.monitor = Monitor(cluster)
 cluster.files = Files(cluster)
 cluster.registry = CommandRegistry()
-cluster.register_command(AckCommand())
+cluster.register_command(OkCommand())
+cluster.register_command(ErrCommand())
 cluster.register_command(DataCommand())
 cluster.register_command(LockCommand())
 cluster.register_command(UnlockCommand())

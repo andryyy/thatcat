@@ -3,7 +3,7 @@ behavior selectFromLeaflet(formId, options)
     put `<mark style="display: none" id="leaflet-project-name-${formId}"></mark>` into #{'leaflet-map-' + formId}
     set :markers to {}
     if not options.coords
-      call drawMap(51.1, 6.7, 12)
+      call drawMap(0.0, 0.0, 1)
     else
       call drawMap(options.coords.lat, options.coords.lon, options.coords.zoom or 12)
       call setPos(options.coords.lat, options.coords.lon, options.coords.display_name, true)
@@ -60,13 +60,9 @@ behavior selectFromLeaflet(formId, options)
     })
     wait for currentPosUpdated(pos) or 4 s
     if the result's type is 'currentPosUpdated'
-      if pos.coords.accuracy < 1000
-        put (pos.coords.accuracy as Int) + ' Meter' into #{'leaflet-current-accuracy-' + formId}
-        if event's type is 'click'
-          call :map.flyTo([pos.coords.latitude, pos.coords.longitude], 12)
-        end
-      else
-        put 'nicht ermittelbar' into #{'leaflet-current-accuracy-' + formId}
+      put '~' + (pos.coords.accuracy as Int) + ' m' into #{'leaflet-current-accuracy-' + formId}
+      if event's type is 'click' or not options.coords
+        call :map.flyTo([pos.coords.latitude, pos.coords.longitude], 10)
       end
     end
     remove @aria-busy from #{'leaflet-current-position-' + formId}
@@ -130,7 +126,7 @@ behavior selectFromLeaflet(formId, options)
   end
 
   def handleClick(e)
-    call setPos(e.latlng.lat, e.latlng.lng, [e.latlng.lat, e.latlng.lng].join(','), false)
+    call setPos(e.latlng.lat, e.latlng.lng, '', false)
   end
 
   def drawMap(lat, lon, zoom)

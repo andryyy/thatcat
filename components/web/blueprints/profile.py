@@ -1,21 +1,14 @@
-from components.models.users import User, UserProfile, UserProfilePatch
-from components.web.utils import *
-from components.utils import deep_model_dump
+from ..utils import *
+from components.models.users import User, UserProfile, UserProfilePatch, forms
+
 
 blueprint = Blueprint("profile", __name__, url_prefix="/profile")
-
-
-@blueprint.before_request
-async def before_request():
-    global L
-    L = LANG[request.USER_LANG]
 
 
 @blueprint.context_processor
 def load_context():
     context = {
-        "schemas": {"user_profile": UserProfile.model_json_schema()},
-        "L": L,
+        "schemas": {"user_profile": forms["user_profile"]},
     }
     return context
 
@@ -23,17 +16,14 @@ def load_context():
 @blueprint.route("/")
 @acl("any")
 async def user_profile_get():
-    try:
-        async with db:
-            user_doc = await db.get("users", session["id"])
-            user_doc_version = await db.doc_version("users", session["id"])
-            user = User.model_validate(user_doc)
-            user._doc_version = user_doc_version
-    except ValidationError:
-        session_clear()
-        return redirect(url_for("root.root"))
+    async with db:
+        user = await db.get("users", session["id"])
 
-    return await render_template("profile/profile.html", user=user)
+    if user:
+        return await render_template("profile/profile.html", user=User(**user))
+
+    session_clear()
+    return redirect(url_for("root.root"))
 
 
 @blueprint.route("/edit", methods=["PATCH"])
@@ -45,16 +35,21 @@ async def user_profile_patch():
         viewer_doc_version = -1
 
     async with db:
-        user_profile_model = UserProfilePatch.model_validate(request.form_parsed)
-        patch_data = deep_model_dump(user_profile_model)
-        if viewer_doc_version != -1:
-            if await db.doc_version("users", session["id"]) > viewer_doc_version:
-                raise ValueError("", L["Document changed, please reload the form"])
-
-        await db.patch("users", session["id"], {"profile": patch_data})
+        user = await db.get("users", session["id"])
+        user = User(**user)
+        patch_data = UserProfilePatch(**request.form_parsed)
+        user.profile = replace(user.profile, **patch_data.dump_patched())
+        user_dict = asdict(user)
+        session["profile"]["vault"] = user_dict["profile"]["vault"]
+        await db.patch(
+            "users",
+            session["id"],
+            {"profile": user_dict["profile"]},
+            base_version=viewer_doc_version,
+        )
 
     session.pop("profile", None)
-    session["profile"] = patch_data
+    session["profile"] = user_dict["profile"]
 
     return trigger_notification(
         level="success",
@@ -62,6 +57,6 @@ async def user_profile_patch():
         title="Profile updated",
         message="Your profile was updated",
         additional_triggers={
-            "profileUpdate": {"vault": session["profile"]["vault"]},
+            "profileUpdate": {"vault": user_dict["profile"]["vault"]},
         },
     )

@@ -1,14 +1,13 @@
-import magic
 import math
-from io import BytesIO
+
 from PIL import Image, UnidentifiedImageError
 from PIL.ExifTags import GPSTAGS, TAGS
+from io import BytesIO
 
 
 class ImageExif:
     def __init__(self, image_bytes: bytes):
-        self.image_bytes = image_bytes
-        self.image = Image.open(image_bytes)
+        self.image = Image.open(BytesIO(image_bytes))
         self.gps_info = {}
         self.exif_data = self.image._getexif()
         if not self.exif_data:
@@ -54,7 +53,7 @@ class ImageExif:
                         self.gps_info[gps_tag] = gps_value
 
     @property
-    def coords(self):
+    def lat_lon(self):
         self._load_gps_info()
         if not self.gps_info:
             raise ValueError("No GPS info")
@@ -68,38 +67,6 @@ class ImageExif:
             lon_ref = self.gps_info["GPSLongitudeRef"]
             if lon_ref != "E":
                 lon = -lon
-            return f"{lat},{lon}"
+            return lat, lon
         except KeyError:
-            return None
-
-
-def image_bytes_to_webp(
-    image_bytes: bytes, max_width: int = 0, quality: int = 85
-) -> bytes:
-    with Image.open(BytesIO(image_bytes)) as img:
-        width, height = img.size
-
-        if max_width and width > max_width:
-            new_height = int(max_width * height / width)
-            img = img.resize((max_width, new_height), Image.LANCZOS)
-
-        if img.mode in ("RGBA", "P"):
-            img = img.convert("RGB")
-
-        output_io = BytesIO()
-        img.save(output_io, format="WEBP", quality=quality)
-        return output_io.getvalue()
-
-
-def convert_file_to_webp(file_path: str, max_width: int = 0, quality: int = 85) -> None:
-    with Image.open(file_path) as img:
-        width, height = img.size
-
-        if max_width and width > max_width:
-            new_height = int(max_width * height / width)
-            img = img.resize((max_width, new_height), Image.LANCZOS)
-
-        if img.mode in ("RGBA", "P"):
-            img = img.convert("RGB")
-
-        img.save(file_path, format="WEBP", quality=quality)
+            raise ValueError("No lat, lon data")

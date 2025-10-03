@@ -1,12 +1,7 @@
 import asyncio
 import ssl
 
-from .exceptions import MonitoringTaskExists
-from .leader import elect_leader
 from components.logs import logger
-from components.utils.datetimes import ntime_utc_now
-from config import defaults
-from contextlib import suppress
 
 
 class Monitor:
@@ -14,91 +9,63 @@ class Monitor:
         self.cluster = cluster
 
     async def server(self):
-        c = 0
-
-        while True:
+        while not self.cluster.stop_event.is_set():
             await asyncio.sleep(1)
-            c += 1
-
-            if not self.cluster.peers.local.cluster_complete:
-                if (
-                    self.cluster.peers._first_complete.is_set()
-                    and self.cluster.peers.local.leader
-                    and c % 4
-                ):
-                    continue
-
+            if not self.cluster.peers.local.cluster_complete.is_set():
                 try:
                     for peer, data in self.cluster.peers.remotes.items():
-                        if not data.graceful_shutdown:
-                            async with self.cluster.receiving:
-                                sent = await self.cluster.send_command("STATUS", peer)
-                                await self.cluster.await_receivers(
-                                    sent, raise_err=False, timeout=3
-                                )
+                        if data.established:
+                            await self.cluster.send_command(
+                                "STATUS", peer, raise_err=False
+                            )
+                        elif not data.graceful_shutdown:
+                            await self.cluster.send_command("INIT", peer)
                 except Exception as e:
-                    logger.critical(e)
-                    pass
+                    logger.warning(e)
                 finally:
-                    elect_leader(self.cluster.peers)
-            c = 0
+                    await self.cluster.peers.leader_election()
 
-    async def _cleanup_peer_connection(self, peer):
-        logger.info(f"Removing peer {peer}")
-        await self.cluster.peers.reset(peer)
-        elect_leader(self.cluster.peers)
-
-    def _get_task_index_by_name(self, name: str) -> int | None:
-        for index, task in enumerate(self.cluster.tasks):
-            if task.get_name() == name:
-                return index
-        return None
-
-    async def peer_worker(self, name):
-        ireader, iwriter = self.cluster.peers.remotes[name].streams.ingress
-        timeout_c = 0
-        c = 0
-
-        logger.info(f"Evaluating stream for {name}")
-        while not name in self.cluster.peers.get_established():
-            await asyncio.sleep(0.125)
-
-        oreader, owriter = self.cluster.peers.remotes[name].streams.egress
-
-        elect_leader(self.cluster.peers)
-
-        while True and timeout_c < 3:
+    async def _peer_worker(self, name):
+        failures = 0
+        while failures < 5:
             try:
+                peer = self.cluster.peers.remotes[name]
+                ireader, iwriter = peer.streams.ingress
+                ereader, ewriter = peer.streams.egress
+
                 assert not all(
                     [
-                        oreader.at_eof(),
+                        ereader.at_eof(),
                         ireader.at_eof(),
                         iwriter.is_closing(),
-                        owriter.is_closing(),
+                        ewriter.is_closing(),
                     ]
                 )
 
-                async with asyncio.timeout(defaults.CLUSTER_PEERS_TIMEOUT * 3):
-                    iwriter.write(b"\x11")
+                async with asyncio.timeout(1.5):
+                    iwriter.write(b"\x00")
                     await iwriter.drain()
-                    res = await oreader.readexactly(1)
-                    assert res == b"\x11"
+                    res = await ereader.readexactly(1)
+                    assert res == b"\x00"
 
-                timeout_c = 0
-                await asyncio.sleep(1)
+                failures = 0
+                await asyncio.sleep(0.5)
 
             except asyncio.CancelledError:
-                logger.info(f"Stopping peer monitoring for {name}")
+                logger.info(f"Stopping monitoring of {name}")
+                if self.cluster.stop_event.is_set():
+                    raise
                 break
             except TimeoutError:
-                timeout_c += 1
+                failures += 1
+                logger.warning(f"{name} is failing [{'#' * failures: <5}]")
                 continue
             except (
                 AssertionError,
                 ConnectionResetError,
                 asyncio.exceptions.IncompleteReadError,
             ):
-                logger.error(f"Peer {name} failed")
+                logger.error(f"{name} failed")
                 break
 
         try:
@@ -109,25 +76,23 @@ class Monitor:
             pass
 
         try:
-            owriter.close()
+            ewriter.close()
             async with asyncio.timeout(0.1):
-                await owriter.wait_closed()
-            await owriter.wait_closed()
+                await ewriter.wait_closed()
+            await ewriter.wait_closed()
         except:
             pass
 
-    def _on_task_done(self, task: asyncio.Task):
-        if not self.cluster.stop_event.is_set():
-            sub_t = asyncio.create_task(self._cleanup_peer_connection(task.get_name()))
-            self.cluster.tasks.add(sub_t)
-            sub_t.add_done_callback(self.cluster.tasks.discard)
-
-        self.cluster.tasks.discard(task)
+        logger.info(f"Removing {name}")
+        async with peer.lock:
+            peer.streams.ingress = None
+            peer.streams.egress = None
+            peer.meta = None
+            await self.cluster.peers.leader_election()
 
     async def peer(self, name):
-        if name in [task.get_name() for task in self.cluster.tasks]:
-            raise MonitoringTaskExists(name)
-
-        t = asyncio.create_task(self.peer_worker(name), name=name)
+        logger.info(f"Monitoring {name}")
+        await self.cluster.peers.leader_election()
+        t = asyncio.create_task(self._peer_worker(name), name=name)
         self.cluster.tasks.add(t)
-        t.add_done_callback(self._on_task_done)
+        t.add_done_callback(self.cluster.tasks.discard)

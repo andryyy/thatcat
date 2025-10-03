@@ -3,9 +3,9 @@
   <td>
     <input type="checkbox" class="multiselect" name="id" value="{{ object.id }}" autocomplete="off">
     <a href="#" hx-target="#body-main" hx-push-url="true" hx-get="/objects/{{ request.view_args.get("object_type") }}/{{ object.id }}">
-      {{- object.name -}}
+      {{- object.vin -}}
     </a>
-    <mark>{{ match.name }}</mark>
+    <mark>{{ match.name if match else "<" ~ L["No assignment"] ~ ">" }}</mark>
   </td>
   <td class="created-modified">
     <small _="init js return new Date('{{ object.created }}').toLocaleString() end then put result into me">{{ object.created }}</small>

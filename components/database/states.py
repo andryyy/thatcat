@@ -1,11 +1,12 @@
 from dataclasses import dataclass, field
-from threading import RLock
+from threading import RLock, Timer
 
 
 class LockedDict(dict):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._lock = RLock()
+        self._expirations = {}
 
     def __getitem__(self, key):
         with self._lock:
@@ -17,7 +18,33 @@ class LockedDict(dict):
 
     def __delitem__(self, key):
         with self._lock:
+            if key in self._expirations:
+                self._expirations[key].cancel()
+                del self._expirations[key]
             return super().__delitem__(key)
+
+    def set(self, key, value):
+        with self._lock:
+            self[key] = value
+
+    def set_and_expire(self, key, value, ttl: float):
+        with self._lock:
+            self[key] = value
+
+            if key in self._expirations:
+                self._expirations[key].cancel()
+
+            timer = Timer(ttl, self._expire_key, args=(key,))
+            self._expirations[key] = timer
+            timer.daemon = True
+            timer.start()
+
+    def _expire_key(self, key):
+        with self._lock:
+            if key in self:
+                super().__delitem__(key)
+            if key in self._expirations:
+                del self._expirations[key]
 
     def update(self, *args, **kwargs):
         with self._lock:
@@ -26,8 +53,6 @@ class LockedDict(dict):
     def get(self, key, default=None):
         with self._lock:
             return super().get(key, default)
-
-    # etc. — you can override more as needed
 
 
 class LockedSet(set):

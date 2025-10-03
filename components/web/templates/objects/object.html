@@ -5,8 +5,7 @@
 {% block breadcrumb %}
 <nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
   <ul>
-    <li><span>{{ L["Objects"] }}</span></li>
-    <li><a href="#" hx-target="#body-main" hx-get="/objects">{{ L["Categories"] }}</a></li>
+    <li><span>...</span></li>
     <li><a href="#" hx-target="#body-main" hx-get="/objects/{{ request.view_args.get("object_type") }}">{{ L[request.view_args.get("object_type")|capitalize] }}</a></li>
     <li><a href="#" hx-target="#body-main" hx-get="/objects/{{ request.view_args.get("object_type") }}/{{ object.id }}">{{ object.name }}</a></li>
   </ul>

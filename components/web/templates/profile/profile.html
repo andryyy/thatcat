@@ -14,7 +14,7 @@
 {% block body %}
 
 <h5>{{ L["My data"] }}</h5>
-
+{{ user._test }}
 <article
   id="profile-container"
   hx-trigger="reloadProfile"
@@ -27,7 +27,7 @@
       _="on htmx:afterRequest[event.detail.successful==true] from me trigger reloadProfile on #profile-container"
       id="profile-form"
       hx-trigger="submit throttle:1s"
-      hx-patch="/profile/edit?doc_version={{ user._doc_version }}">
+      hx-patch="/profile/edit?doc_version={{ user.doc_version }}">
       {% with
         schema=schemas.user_profile,
         current_data=user.profile
@@ -42,25 +42,25 @@
   <h6>{{ L["Passkeys"] }}</h6>
   <div class="grid-auto-cols">
     {% for credential in user.credentials|sort(attribute="friendly_name") %}
-    <article id="profile-credential-{{ credential.id|hex }}">
+    <article id="profile-credential-{{ credential.id }}">
       <div class="grid-space-between">
         <div _="install inlineHtmxRename()"
         contenteditable
         data-patch-parameter="friendly_name"
         spellcheck="false"
-        hx-patch="/users/{{ session.id }}/credential/{{ credential.id|hex }}"
+        hx-patch="/users/{{ session.id }}/credential/{{ credential.id }}"
         hx-trigger="editContent">
           {{- credential.friendly_name -}}
         </div>
-        {% if session["cred_id"] == credential.id|hex %}
+        {% if session["cred_id"] == credential.id %}
         <mark>{{ L["Signed in"] }}</mark>
         {% endif %}
       </div>
       <fieldset>
-        <label hx-patch="/users/{{ session.id }}/credential/{{ credential.id|hex }}"
+        <label hx-patch="/users/{{ session.id }}/credential/{{ credential.id }}"
           hx-params="active"
-          hx-vals='js:{"active":document.getElementById("cred-toggle-{{ credential.id|hex }}").checked}'>
-          <input id="cred-toggle-{{ credential.id|hex }}"
+          hx-vals='js:{"active":document.getElementById("cred-toggle-{{ credential.id }}").checked}'>
+          <input id="cred-toggle-{{ credential.id }}"
             type="checkbox"
             role="switch" {{ "checked" if credential.active }} /> {{ L["Passkey enabled"] }}
         </label>
@@ -74,9 +74,9 @@
       <hr>
       <a href="#" class="color-red"
         hx-confirm="Passkey wirklich entfernen?"
-        _="install confirmButton on htmx:afterRequest[event.detail.successful==true] remove #profile-credential-{{ credential.id|hex }} end"
+        _="install confirmButton on htmx:afterRequest[event.detail.successful==true] remove #profile-credential-{{ credential.id }} end"
         hx-trigger="confirmedButton throttle:200ms"
-        hx-delete="/users/{{ session.id }}/credential/{{ credential.id|hex }}">{{ L["Remove"] }}</a>
+        hx-delete="/users/{{ session.id }}/credential/{{ credential.id }}">{{ L["Remove"] }}</a>
     </article>
     {% endfor %}
   </section>

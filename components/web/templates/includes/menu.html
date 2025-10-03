@@ -121,7 +121,7 @@
           data-protonpass-ignore="true"
           autocapitalize="off"
           spellcheck="false"/>
-        <a role="button" href="#" id="vault-unlock" data-vault='{{ session.profile.vault|tojson }}'>...</a>
+        <a role="button" href="#" id="vault-unlock" data-vault='{{ session.profile.vault or "" }}'>...</a>
       </fieldset>
       <footer>
         <button _="on click remove @open from closest <dialog/>">{{ L["Close"] }}</button>
@@ -134,10 +134,8 @@
     <span id="ws-indicator"
       {% if session["login"] %}
       class="no-text-decoration"
-      data-tooltip="{{ L["Disconnected"] }}"
       {% else %}
       class="no-text-decoration dark"
-      data-tooltip="{{ L["Not signed in"] }}"
       {% endif %}
       hx-swap-oob="outerHTML">⭕</span>
     <span id="nav-theme-bulb"

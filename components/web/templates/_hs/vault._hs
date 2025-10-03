@@ -87,10 +87,9 @@ behavior vaultToggle
   end
 
   on profileUpdate from body
-    exit unless #vault-unlock's @data-vault == "{}"
     if event.detail.vault
-      set #vault-unlock's @data-vault to (event.detail.vault as JSON)
-      call setLocked()
+      set #vault-unlock's @data-vault to event.detail.vault
+      if event.detail.vault != "{}" call setLocked() end
     end
   end
 

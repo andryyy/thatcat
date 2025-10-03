@@ -1,44 +1,78 @@
-import random
 import json
+import random
+
+from components.models.helpers import *
+from components.utils import ensure_list, ntime_utc_now, unique_list, utc_now_as_str
 from config.defaults import ACCEPT_LANGUAGES
-from components.utils import (
-    ensure_list,
-    to_unique_sorted_str_list,
-    ntime_utc_now,
-    utc_now_as_str,
-)
-from components.models import *
-from components.models.objects import model_classes
+from dataclasses import asdict, dataclass, field, fields
+from functools import cached_property
 
 USER_FILTERABLES = ["list:acl", "list:groups"]
 USER_ACLS = ["user", "system"]
 
 
-class UsersPagination(BaseModel):
-    page: int
-    page_size: int
+@dataclass
+class PatchTemplate:
+    def dump_patched(self):
+        return {
+            f.name: getattr(self, f.name)
+            for f in fields(self)
+            if getattr(self, f.name) is not None
+        }
+
+
+@dataclass
+class UsersPagination:
+    page: int | str
+    page_size: int | str
     sort_attr: str
-    sort_reverse: bool
-    pages: int = 0
-    elements: int = 0
+    sort_reverse: bool | str
+    pages: int | str = 0
+    elements: int | str = 0
+
+    def __post_init__(self) -> None:
+        for name in ("page_size", "pages", "elements"):
+            setattr(self, name, to_int(getattr(self, name)))
+
+        self.page = to_int(self.page) or 1
+        self.sort_reverse = to_bool(self.sort_reverse)
+
+        if not isinstance(self.sort_attr, str):
+            raise TypeError(
+                "sort_attr",
+                f"'sort_attr' must be string, got {type(self.sort_attr).__name__}",
+            )
 
 
-class Vault(BaseModel):
+@dataclass
+class Vault:
     public_key_pem: str
     wrapped_private_key: str
     iv: str
     salt: str
 
+    def __post_init__(self) -> None:
+        for f in fields(self):
+            setattr(self, f, to_str(getattr(self, f)))
 
-class TokenConfirmation(BaseModel):
-    confirmation_code: Annotated[int, AfterValidator(lambda i: "%06d" % i)]
-    token: constr(strip_whitespace=True, min_length=14, max_length=14)
+
+@dataclass
+class TokenConfirmation:
+    confirmation_code: int | str
+    token: str
+
+    def __post_init__(self) -> None:
+        self.confirmation_code = "%06d" % to_int(self.confirmation_code)
+        self.token = to_str(self.token.strip())
+        if len(self.token) != 14:
+            raise ValueError("token", "'token' has wrong length")
 
 
-class Auth(BaseModel):
-    login: constr(strip_whitespace=True, min_length=1)
+@dataclass
+class Authentication:
+    login: str
+    id: str | None = None
 
-    @computed_field
     @cached_property
     def token(self) -> str:
         return "%04d-%04d-%04d" % (
@@ -47,257 +81,290 @@ class Auth(BaseModel):
             random.randint(0, 9999),
         )
 
+    def __post_init__(self) -> None:
+        self.login = to_str(self.login.strip())
+        if len(self.login) < 3:
+            raise ValueError("login", "'login' must be at least 3 characters long")
 
-class UserProfile(BaseModel):
-    _form_id: str = PrivateAttr(default=f"form-{str(uuid4())}")
+        if self.id is not None:
+            self.id = validate_uuid_str(self.id)
 
-    vault: Vault | dict = Field(
-        default={},
-        json_schema_extra={
+
+@dataclass
+class UserProfileData:
+    updated: str = field(default_factory=utc_now_as_str)
+    vault: Vault | dict | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    email: str | None = None
+    access_tokens: list[str | None] | str = field(default_factory=list)
+    permit_auth_requests: bool = True
+
+
+@dataclass
+class UserProfile(UserProfileData):
+    def __post_init__(self) -> None:
+        for name in ("first_name", "last_name", "email", "updated"):
+            if getattr(self, name):
+                setattr(self, name, to_str(getattr(self, name).strip()) or None)
+
+        self.access_tokens = unique_list(ensure_list(self.access_tokens))
+        if not all(
+            isinstance(item, str) and len(item) > 15 for item in self.access_tokens
+        ):
+            raise ValueError(
+                "access_tokens",
+                "Tokens in 'access_tokens' must have at least 16 characters",
+            )
+
+        self.permit_auth_requests = to_bool(self.permit_auth_requests)
+
+        print(self.vault)
+        print(type(self.vault))
+        if not self.vault:
+            self.vault = {}
+        elif isinstance(self.vault, dict):
+            self.vault = Vault(**self.vault)
+
+        if self.email and not email_validator(self.email):
+            raise ValueError("email", "'email' must be a valid email address")
+
+
+@dataclass
+class CredentialBase:
+    updated: str
+    created: str
+
+
+@dataclass
+class CredentialData:
+    id: str | bytes
+    public_key: str
+    friendly_name: str = "New passkey"
+    sign_count: int = 0
+    active: bool = True
+    last_login: str | None = None
+
+
+@dataclass
+class Credential(CredentialData, CredentialBase):
+    def __post_init__(self):
+        if not isinstance(self.id, (str, bytes)) or self.id == "":
+            raise ValueError("id", "'id' must be a non-empty string or bytes")
+
+        if isinstance(self.id, bytes):
+            self.id = self.id.hex()
+
+        if (
+            not isinstance(self.public_key, str)
+            or to_str(self.public_key.strip()) == ""
+        ):
+            raise ValueError("public_key", "'public_key' must be a non-empty string")
+
+        if not isinstance(self.updated, str) or to_str(self.updated.strip()) == "":
+            raise ValueError("updated", "'updated' must be a non-empty string")
+
+        if not isinstance(self.created, str) or to_str(self.created.strip()) == "":
+            raise ValueError("created", "'created' must be a non-empty string")
+
+        if self.last_login is not None:
+            self.last_login = to_str(self.last_login.strip()) or None
+
+        self.sign_count = to_int(self.sign_count)
+        self.active = to_bool(self.active)
+
+        self.friendly_name = to_str(self.friendly_name.strip())
+        if not self.friendly_name:
+            self.friendly_name = "New passkey"
+
+
+@dataclass
+class CredentialPatch(CredentialData, PatchTemplate):
+    updated: str = field(default_factory=utc_now_as_str, init=False)
+    id: str = field(default=None, init=False, repr=False)
+    active: bool | None = None
+    sign_count: int | None = None
+    public_key: str | None = None
+    friendly_name: str | None = None
+
+
+@dataclass
+class CredentialAdd(CredentialData):
+    updated: str = field(default_factory=utc_now_as_str, init=False)
+    created: str = field(default_factory=utc_now_as_str, init=False)
+
+    def __post_init__(self):
+        Credential(**asdict(self))
+        if isinstance(self.id, bytes):
+            self.id = self.id.hex()
+
+
+@dataclass
+class UserBase:
+    id: str
+    updated: str
+    created: str
+    doc_version: int | str
+
+
+@dataclass
+class UserData:
+    login: str
+    credentials: list[Credential | CredentialAdd | dict | None] = field(
+        default_factory=list
+    )
+    acl: list[str | None] | str = field(default_factory=list)
+    groups: list[str | None] | str = field(default_factory=list)
+    profile: UserProfile | dict = field(default_factory=UserProfile)
+    active: bool = True
+
+
+@dataclass
+class User(UserData, UserBase):
+    def __post_init__(self) -> None:
+        self.id = validate_uuid_str(self.id)
+        self.doc_version = to_int(self.doc_version)
+
+        if not isinstance(self.updated, str) or self.updated == "":
+            raise ValueError("updated", "'updated' must be a non-empty string")
+
+        if not isinstance(self.created, str) or self.created == "":
+            raise ValueError("created", "'created' must be a non-empty string")
+
+        self.groups = unique_list(ensure_list(self.groups))
+        if not all(isinstance(item, str) and len(item) > 0 for item in self.groups):
+            raise ValueError("groups", "'groups' must contain non-empty strings")
+
+        self.acl = unique_list(ensure_list(self.acl))
+        if not all(acl in USER_ACLS for acl in self.acl):
+            raise ValueError("acl", "'acl' must contain a user ACL")
+
+        self.login = to_str(self.login.strip())
+        if len(self.login) < 3:
+            raise ValueError("login", "'login' must be at least 3 characters long")
+
+        self.active = to_bool(self.active)
+
+        if self.credentials == "":
+            self.credentials = []
+        elif self.credentials != []:
+            credentials = []
+            for credential in self.credentials:
+                if credential not in credentials:
+                    if isinstance(credential, dict):
+                        credentials.append(Credential(**credential))
+                    elif isinstance(credential, (Credential, CredentialAdd)):
+                        credentials.append(credential)
+                    else:
+                        raise TypeError(
+                            "credentials",
+                            f"Invalid type for 'credentials': {type(credential).__name__}",
+                        )
+            self.credentials = credentials
+
+        if isinstance(self.profile, dict):
+            self.profile = UserProfile(**self.profile)
+        elif not isinstance(self.profile, UserProfile):
+            raise TypeError(
+                "profile", f"Invalid type for 'profile': {type(self.profile).__name__}"
+            )
+
+
+@dataclass
+class UserGroups:
+    name: str
+    new_name: str
+    members: list[str] | str
+
+    def __post_init__(self) -> None:
+        self.name = to_str(self.name.strip())
+        if len(self.name) < 1:
+            raise ValueError("name", "'name' must be at least 1 character long")
+
+        self.new_name = to_str(self.new_name.strip())
+        if len(self.new_name) < 1:
+            raise ValueError("new_name", "'new_name' must be at least 1 character long")
+
+        self.members = [
+            validate_uuid_str(u) for u in unique_list(ensure_list(self.members))
+        ]
+        if not self.members:
+            raise ValueError("members", "'members' must not be empty")
+
+
+@dataclass
+class UserAdd(UserData):
+    updated: str = field(default_factory=utc_now_as_str, init=False)
+    created: str = field(default_factory=utc_now_as_str, init=False)
+
+    def __post_init__(self):
+        User(**asdict(self))
+
+
+@dataclass
+class UserProfilePatch(UserProfileData, PatchTemplate):
+    access_tokens: list[str | None] | str | None = None
+    permit_auth_requests: bool | None = None
+    updated: str = field(default_factory=utc_now_as_str, init=False)
+
+
+@dataclass
+class UserPatch(UserData, PatchTemplate):
+    id: str = field(default=None, init=False, repr=False)
+    profile: UserProfilePatch | None = None
+    login: str | None = None
+    credentials: list[Credential | CredentialAdd | dict | None] | None = None
+    acl: list[str | None] | str | None = None
+    groups: list[str | None] | str | None = None
+    active: bool | None = None
+    updated: str = field(default_factory=utc_now_as_str, init=False)
+
+
+@dataclass
+class UserSession:
+    id: str
+    login: str
+    acl: list[str]
+    cred_id: str | bytes | None = None
+    lang: str = "en"
+    profile: UserProfile | dict = field(default_factory=UserProfile)
+    login_ts: float = field(default_factory=ntime_utc_now)
+
+
+forms = {
+    "user_profile": {
+        "vault": {
             "title": "Vault configuration",
             "type": "vault",
             "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
         },
-    )
-
-    first_name: str | None = Field(
-        default="",
-        json_schema_extra={
+        "first_name": {
             "title": "First name",
             "type": "text",
             "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
         },
-    )
-
-    last_name: str | None = Field(
-        default="",
-        json_schema_extra={
+        "last_name": {
             "title": "Last name",
             "type": "text",
             "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
         },
-    )
-
-    email: str | None = Field(
-        default="",
-        json_schema_extra={
+        "email": {
             "title": "Email address",
             "description": "Optional email address",
             "type": "email",
             "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
         },
-    )
-
-    access_tokens: list[constr(min_length=16) | None] | None = Field(
-        default=None,
-        json_schema_extra={
+        "access_tokens": {
             "title": "API keys",
             "description": "API keys can be used for programmatic access",
             "type": "list:text",
             "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
         },
-    )
-
-    permit_auth_requests: bool | None = Field(
-        default=True,
-        json_schema_extra={
+        "permit_auth_requests": {
             "title": "Interactive sign-in requests",
             "description": "Show a dialog on sign-in requests to signed in users to quickly confirm access",
             "type": "toggle",
             "input_extra": 'autocomplete="off"',
         },
-    )
-
-    updated: str | None = None
-
-
-class Credential(BaseModel):
-    id: Annotated[str, AfterValidator(lambda x: bytes.fromhex(x))] | bytes
-    public_key: str
-    friendly_name: constr(strip_whitespace=True, min_length=1)
-    last_login: str
-    sign_count: int
-    active: bool
-    updated: str
-    created: str
-
-    @field_serializer("id")
-    def serialize_bytes_to_hex(self, v: bytes, _info):
-        return v.hex() if isinstance(v, bytes) else v
-
-
-class CredentialAdd(BaseModel):
-    id: Annotated[str, AfterValidator(lambda x: bytes.fromhex(x))] | bytes
-    public_key: str
-    sign_count: int
-    friendly_name: constr(strip_whitespace=True, min_length=1) = "New passkey"
-    active: bool = True
-    last_login: str = ""
-
-    @computed_field
-    @property
-    def created(self) -> str:
-        return utc_now_as_str()
-
-    @computed_field
-    @property
-    def updated(self) -> str:
-        return utc_now_as_str()
-
-    @field_serializer("id")
-    def serialize_bytes_to_hex(self, v: bytes, _info):
-        return v.hex() if isinstance(v, bytes) else v
-
-
-class User(BaseModel):
-    _doc_version: int = 0
-    id: Annotated[str, AfterValidator(lambda v: str(UUID(v)))]
-    login: constr(strip_whitespace=True, min_length=1)
-    credentials: list[Credential | CredentialAdd] = []
-    acl: list
-    groups: Annotated[
-        constr(strip_whitespace=True, min_length=1)
-        | list[constr(strip_whitespace=True, min_length=1) | None],
-        AfterValidator(lambda v: ensure_list(v)),
-    ] = []
-    profile: UserProfile
-    created: str
-    updated: str
-    active: bool
-
-
-class UserGroups(BaseModel):
-    name: constr(strip_whitespace=True, min_length=1)
-    new_name: constr(strip_whitespace=True, min_length=1)
-    members: Annotated[
-        str | list,
-        AfterValidator(lambda x: to_unique_sorted_str_list(ensure_list(x))),
-    ] = []
-
-
-class UserAdd(BaseModel):
-    login: constr(strip_whitespace=True, min_length=1)
-    credentials: list[str] = []
-    acl: Annotated[
-        Literal[*USER_ACLS] | list[Literal[*USER_ACLS]],
-        AfterValidator(lambda v: ensure_list(v)),
-    ] = ["user"]
-    profile: UserProfile = UserProfile.model_validate({})
-    groups: list[constr(strip_whitespace=True, min_length=1)] = []
-    active: bool = False
-    id: str | None = None
-
-    @field_validator("id")
-    def id_validator(cls, v):
-        if v:
-            return str(UUID(v))
-        return str(uuid4())
-
-    @computed_field
-    @property
-    def created(self) -> str:
-        return utc_now_as_str()
-
-    @computed_field
-    @property
-    def updated(self) -> str:
-        return utc_now_as_str()
-
-
-class UserPatch(BaseModel):
-    login: str | None = None
-    acl: Annotated[
-        Literal[*USER_ACLS] | list[Literal[*USER_ACLS]],
-        AfterValidator(lambda v: ensure_list(v)),
-    ] = []
-    groups: str | list | None = None
-    active: bool | None = None
-
-    @computed_field
-    @property
-    def updated(self) -> str:
-        return utc_now_as_str()
-
-
-class UserProfilePatch(BaseModel):
-    first_name: str | None = None
-    last_name: str | None = None
-    email: str | None = None
-    vault: Json | Vault | None = None
-    access_tokens: constr(min_length=16) | Literal[""] | list[
-        constr(min_length=16) | None
-    ] | None = None
-    permit_auth_requests: bool | None = None
-
-    @field_validator("email", mode="before")
-    def email_validator(cls, v):
-        if v in [None, ""]:
-            return ""
-        try:
-            email = validate_email(v, check_deliverability=False).ascii_email
-        except:
-            raise PydanticCustomError(
-                "email",
-                "Die E-Mail Adresse ist ungültig",
-                dict(),
-            )
-        return email
-
-    @field_validator("vault")
-    def vault_validator(cls, v):
-        if isinstance(v, Vault) or v == {}:
-            return v
-        if isinstance(v, dict):
-            return Vault.model_validate(v)
-        return v
-
-    @field_validator("access_tokens")
-    def access_tokens_validator(cls, v):
-        if v is not None:
-            return list(set(ensure_list(v)))
-        return v
-
-    @computed_field
-    @property
-    def updated(self) -> str:
-        return utc_now_as_str()
-
-
-class CredentialPatch(BaseModel):
-    friendly_name: constr(strip_whitespace=True, min_length=1) | None = None
-    active: bool | None = None
-    last_login: str | None = None
-    sign_count: int | None = None
-
-    @computed_field
-    @property
-    def updated(self) -> str:
-        return utc_now_as_str()
-
-
-class UserSession(BaseModel):
-    id: str
-    login: str
-    acl: list | str
-    cred_id: str | None = None
-    lang: Literal[*ACCEPT_LANGUAGES] = "en"
-    profile: dict | UserProfile | None = {}
-    login_ts: float = Field(default_factory=ntime_utc_now)
-    callbacks: list = []
-
-
-class ListRowUser(BaseModel):
-    id: Annotated[UUID | str, AfterValidator(lambda v: str(UUID(v)))]
-    created: str
-    updated: str
-    login: constr(strip_whitespace=True, min_length=1)
-    groups: Annotated[
-        constr(strip_whitespace=True, min_length=1)
-        | list[constr(strip_whitespace=True, min_length=1) | None],
-        AfterValidator(lambda v: ensure_list(v)),
-    ] = []
-
-    @computed_field
-    @property
-    def name(self) -> str:
-        return self.login
+    }
+}

@@ -2,8 +2,8 @@
 
 {% if "system" in session.get("acl", []) %}
 <div class="filters" _="install objectFilters(submitForm: #{{ request.view_args.get("object_type") }}-table-search)">
-  <input class="filter-input" type="text" placeholder="Benutzername">
-  <small>Nach Benutzernamen filtern</small>
+  <input class="filter-input" type="text" placeholder="{{ L["User"] }}">
+  <small>{{ L["Filter by user"] }}</small>
   <div class="filter-buttons" hidden>
     {% for user_id, user_data in request.form_options.users.items() %}
     <button
@@ -18,8 +18,8 @@
 </div>
 {% endif %}
 <div class="filters" _="install objectFilters(submitForm: #{{ request.view_args.get("object_type") }}-table-search)">
-  <input class="filter-input" type="text" placeholder="Projektname">
-  <small>Nach Projektnamen filter</small>
+  <input class="filter-input" type="text" placeholder="{{ L["Project"] }}">
+  <small>{{ L["Filter by project name"] }}</small>
   <div class="filter-buttons">
     {% for project_id, project_data in request.form_options.projects.items() if project_data.permitted == True %}
     <button

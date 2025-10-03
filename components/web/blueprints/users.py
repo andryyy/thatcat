@@ -1,28 +1,24 @@
-from components.models.users import USER_ACLS, UserProfile, ListRowUser, User
+from components.models.users import (
+    USER_ACLS,
+    UserProfile,
+    User,
+    CredentialPatch,
+    UserPatch,
+    UserProfilePatch,
+    forms,
+)
 from components.utils import batch, ensure_list
-from components.web.utils import *
+from ..utils import *
 
 
 blueprint = Blueprint("users", __name__, url_prefix="/users")
 
 
-@blueprint.before_request
-async def before_request():
-    global L
-    request.USER_LANG = (
-        session.get("lang")
-        or request.accept_languages.best_match(defaults.ACCEPT_LANGUAGES)
-        or "en"
-    )
-    L = LANG[request.USER_LANG]
-
-
 @blueprint.context_processor
 def load_context():
     return {
-        "schemas": {"user_profile": UserProfile.model_json_schema()},
+        "schemas": {"user_profile": forms["user_profile"]},
         "USER_ACLS": USER_ACLS,
-        "L": LANG[request.USER_LANG],
     }
 
 
@@ -32,14 +28,14 @@ async def get_user(user_id: str):
     async with db:
         user = await db.get("users", user_id)
         if user:
-            user = User.model_validate(user)
+            user = User(**user)
         else:
             if "Hx-Request" in request.headers:
                 return trigger_notification(
                     level="error",
-                    response_code=409,
-                    title=L["User error"],
-                    message=L["User is unknown"],
+                    response_code=404,
+                    title="User error",
+                    message="User is unknown",
                 )
             abort(404)
 
@@ -68,15 +64,7 @@ async def get_users():
             )
 
         return await render_or_json(
-            "users/includes/table_body.html",
-            request.headers,
-            data={
-                "users": [ListRowUser.model_validate(row) for row in rows["items"]],
-                "page_size": rows["page_size"],
-                "page": rows["page"],
-                "pages": rows["total_pages"],
-                "elements": rows["total"],
-            },
+            "users/includes/table_body.html", request.headers, data=rows
         )
     else:
         return await render_template("users/users.html")
@@ -89,15 +77,22 @@ async def delete_user(user_id: str | None = None):
     if request.method == "POST":
         user_ids = request.form_parsed.get("id")
 
-    async with ClusterLock("users"):
+    async with db:
+        delete_ids = set()
         for user_id in ensure_list(user_ids):
-            await components.users.delete(user_id=user_id)
+            if user_id == session["id"]:
+                raise ValueError("user_id", "Cannot remove this user")
+            if not db.get("users", user_id):
+                raise ValueError("user_id", "User is not available")
+            delete_ids.add(user_id)
+        for delete_id in delete_ids:
+            await db.delete("users", delete_id)
 
     return trigger_notification(
         level="success",
         response_code=204,
-        title="User removed",
-        message=f"{len(ensure_list(user_ids))} user{'s' if len(ensure_list(user_ids)) > 1 else ''} removed",
+        title="Completed",
+        message="User removed" if len(delete_ids) == 1 else "Users removed",
     )
 
 
@@ -107,18 +102,42 @@ async def patch_user_credential(user_id: str, hex_id: str):
     if not "system" in session["acl"]:
         user_id = session["id"]
 
-    async with ClusterLock("users"):
-        await components.users.patch_credential(
-            user_id=user_id,
-            hex_id=hex_id,
-            data=request.form_parsed,
+    async with db:
+        user = await db.get("users", user_id)
+        if user:
+            user = User(**user)
+        else:
+            if "Hx-Request" in request.headers:
+                return trigger_notification(
+                    level="error",
+                    response_code=404,
+                    title="User error",
+                    message="User is unknown",
+                )
+            abort(404)
+
+        for credential in user.credentials:
+            if credential.id == hex_id:
+                matched_user_credential = credential
+                break
+        else:
+            raise ValueError("hex_id", "Unknown passkey")
+
+        user.credentials.remove(matched_user_credential)
+        patch_data = CredentialPatch(**request.form_parsed)
+        patched_credential = replace(
+            matched_user_credential, **patch_data.dump_patched()
         )
+        user.credentials.append(patched_credential)
+        user_dict = asdict(user)
+
+        await db.patch("users", user_id, {"credentials": user_dict["credentials"]})
 
     return trigger_notification(
         level="success",
         response_code=204,
-        title="Credential modified",
-        message="Credential was modified",
+        title="Completed",
+        message="Passkey modified",
     )
 
 
@@ -128,17 +147,30 @@ async def delete_user_credential(user_id: str, hex_id: str):
     if not "system" in session["acl"]:
         user_id = session["id"]
 
-    async with ClusterLock("users"):
-        await components.users.delete_credential(
-            user_id=user_id,
-            hex_id=hex_id,
-        )
+    async with db:
+        user = await db.get("users", user_id)
+        if user:
+            user = User(**user)
+        else:
+            if "Hx-Request" in request.headers:
+                return trigger_notification(
+                    level="error",
+                    response_code=404,
+                    title="User error",
+                    message="User is unknown",
+                )
+            abort(404)
+
+        user.credentials = [c for c in user.credentials if c.id != hex_id]
+        user_dict = asdict(user)
+
+        await db.patch("users", user_id, {"credentials": user_dict["credentials"]})
 
     return trigger_notification(
         level="success",
         response_code=204,
-        title="Credential deleted",
-        message="Credential was removed",
+        title="Completed",
+        message="Passkey removed",
     )
 
 
@@ -149,11 +181,16 @@ async def patch_user(user_id: str | None = None):
     if request.method == "POST":
         user_id = request.form_parsed.get("id")
 
-    async with ClusterLock("users"):
-        await components.users.patch(user_id=user_id, data=request.form_parsed)
-        await components.users.patch_profile(
-            user_id=user_id, data=request.form_parsed.get("profile", {})
-        )
+    async with db:
+        user = await db.get("users", user_id)
+        user = User(**user)
+
+        patch_data = UserPatch(**request.form_parsed)
+
+        user = replace(user, **patch_data.dump_patched())
+        user_dict = asdict(user)
+
+        await db.patch("users", user_id, user_dict)
 
     STATE.session_validated.pop(user_id, None)
 

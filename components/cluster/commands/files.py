@@ -5,10 +5,14 @@ import random
 import zlib
 
 from .plugin import CommandPlugin
-from components.models.cluster import CritErrors
-from components.utils import chunk_string, is_path_within_cwd
+from components.models.cluster import ErrorMessages
+from components.utils import is_path_within_cwd
 from components.utils.files import export_meta
 from contextlib import suppress
+
+
+def chunk_string(s, size=1_000_000):
+    return [s[i : i + size] for i in range(0, len(s), size)]
 
 
 class FileDelCommand(CommandPlugin):
@@ -18,13 +22,13 @@ class FileDelCommand(CommandPlugin):
         file = data.payload
 
         if not is_path_within_cwd(file) or not os.path.exists(file):
-            return CritErrors.INVALID_FILE_PATH.response
+            return ErrorMessages.INVALID_FILE_PATH.response
 
         try:
             os.remove(file)
-            return "ACK"
+            return "OK"
         except:
-            return CritErrors.FILE_UNLINK_FAILED.response
+            return ErrorMessages.FILE_UNLINK_FAILED.response
 
 
 class FilePutCommand(CommandPlugin):
@@ -34,13 +38,13 @@ class FilePutCommand(CommandPlugin):
         file, dest = data.payload.split(" ")
 
         fileget_task = asyncio.create_task(
-            cluster.files.fileget(file, dest, data.sender),
+            cluster.files.fileget(file, dest, data.meta.name),
             name=f"fileget_{file}",
         )
         cluster.tasks.add(fileget_task)
         fileget_task.add_done_callback(cluster.tasks.discard)
 
-        return "ACK"
+        return "OK"
 
 
 class FileGetCommand(CommandPlugin):
@@ -50,10 +54,10 @@ class FileGetCommand(CommandPlugin):
         start, end, file = data.payload.split(" ")
 
         if not is_path_within_cwd(file) or not os.path.exists(file):
-            return CritErrors.INVALID_FILE_PATH.response
+            return ErrorMessages.INVALID_FILE_PATH.response
 
         if os.stat(file).st_size < int(start):
-            return CritErrors.START_BEHIND_FILE_END.response
+            return ErrorMessages.START_BEHIND_FILE_END.response
 
         with open(file, "rb") as f:
             f.seek(int(start))
@@ -64,6 +68,6 @@ class FileGetCommand(CommandPlugin):
         for idx, c in enumerate(chunks, 1):
             await cluster.send_command(
                 f"DATA CHUNKED {idx} {len(chunks)} {c}",
-                data.sender,
+                data.meta.name,
                 ticket=data.ticket,
             )

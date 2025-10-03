@@ -35,8 +35,7 @@
       hx-patch="/system/settings">
       {% with
         schema=schemas.system_settings,
-        current_data=settings.details,
-        root_key="details"
+        current_data=settings
       %}
         {% include "includes/form_builder.html" %}
       {% endwith %}

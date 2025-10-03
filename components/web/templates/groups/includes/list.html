@@ -1,13 +1,13 @@
 {% set groups_dict = {} %}
-{% for user_id, user_data in request.form_options.users.items() %}
-    {% for group in user_data.groups %}
-        {% if group not in groups_dict %}
-            {% set _ = groups_dict.update({group: []}) %}
-        {% endif %}
-        {% if user_id|string not in groups_dict[group] %}
-            {% set _ = groups_dict[group].append(user_id|string) %}
-        {% endif %}
-    {% endfor %}
+{% for user in users %}
+  {% for group in user.groups %}
+    {% if group not in groups_dict %}
+        {% set _ = groups_dict.update({group: []}) %}
+    {% endif %}
+    {% if user.id not in groups_dict[group] %}
+        {% set _ = groups_dict[group].append(user.id) %}
+    {% endif %}
+  {% endfor %}
 {% endfor %}
 
 <section id="user-groups" class="grid-auto-cols"
@@ -15,8 +15,7 @@
   init
     put '' into #user-groups
     set $names to value of <#user-groups [name=name]/> as Array
-    {% for group, members in groups_dict.items() | sort  %}
-    log {{ members|safe }}
+    {% for group, members in groups_dict.items() | sort %}
     if $names does not contain '{{- group -}}'
         append '{{- group -}}' to $names
         render #group-template with (name: '{{- group -}}', members: {{ members|safe }})
@@ -58,7 +57,7 @@
     @set hidden to `hidden`
   @end
   <article class="user-group">
-    <form hx-patch="/groups">
+    <form hx-patch="/groups/">
       <input type="hidden" name="name" value="${name}"/>
       <fieldset data-loading-disable>
         <label>Group name</label>
@@ -70,11 +69,11 @@
           name="members"
           multiple
           class="user-select">
-          {% for user_id, user_data in request.form_options.users.items() %}
-          @if members contains "{{ user_id|string }}"
-            <option selected value="{{ user_id|string }}">{{ user_data.name }}</option>
+          {% for user in users %}
+          @if members contains "{{ user.id }}"
+            <option selected value="{{ user.id }}">{{ user.login }}</option>
           @else
-            <option value="{{ user_id|string }}">{{ user_data.name }}</option>
+            <option value="{{ user.id }}">{{ user.login }}</option>
           @end
           {% endfor %}
         </select>

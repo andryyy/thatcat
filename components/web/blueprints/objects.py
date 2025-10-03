@@ -1,33 +1,23 @@
-import re
-
-from components.models.objects import Location, UUID, model_classes
-from components.utils import (
-    batch,
-    coords_to_display_name,
-    deep_model_dump,
-    ensure_list,
-    ensure_unique_list,
-)
-from components.web.utils import *
+from components.models.objects import Location, model_meta, forms
+from components.utils import ensure_list, unique_list
+from ..utils import *
 
 blueprint = Blueprint("objects", __name__, url_prefix="/objects")
 
 
 @blueprint.before_request
+@acl(["user"])
 async def before_request():
-    global L
-    L = LANG[request.USER_LANG]
-
     request._objects = dict()
 
     if "object_type" in request.view_args:
-        if request.view_args["object_type"] not in model_classes["types"]:
+        if request.view_args["object_type"] not in model_meta["types"]:
             if "Hx-Request" in request.headers:
                 return trigger_notification(
                     level="error",
-                    response_code=409,
-                    title=L["Object error"],
-                    message=L["Object type is unknown"],
+                    response_code=404,
+                    title="Object error",
+                    message="Object type is unknown",
                 )
             abort(404)
 
@@ -40,45 +30,48 @@ async def before_request():
             for id_ in object_ids:
                 match = await db.get(object_type, id_)
                 if match:
-                    match = model_classes["base"][object_type].model_validate(match)
+                    model = model_meta["base"][object_type]
+                    match = model(**match)
                 if not match or (
-                    UUID(session["id"]) not in match.assigned_users
+                    session["id"] not in match.assigned_users
                     and "system" not in session["acl"]
                 ):
                     if "Hx-Request" in request.headers:
                         return trigger_notification(
                             level="error",
-                            response_code=409,
-                            title=L["Object error"],
-                            message=L["Object is unknown"],
+                            response_code=404,
+                            title="Object error",
+                            message="Object is unknown",
                         )
                     abort(404)
 
                 if not "system" in session["acl"]:
-                    for f in model_classes["system_fields"][object_type]:
+                    for f in model_meta["system_fields"][object_type]:
                         if hasattr(match, f):
                             setattr(match, f, None)
 
                 request._objects[id_] = match
 
+    # Cannot be overwritten, but will throw errors if set
+    request.form_parsed.pop("id", None)
+    request.form_parsed.pop("updated", None)
+    request.form_parsed.pop("created", None)
+
 
 @blueprint.context_processor
 async def load_context():
     return {
-        "schemas": model_classes["schemas"],
-        "object_types": model_classes["types"],
-        "L": L,
+        "schemas": forms,
+        "object_types": model_meta["types"],
     }
 
 
 @blueprint.route("/")
-@acl(["user"])
 async def overview():
     return await render_template("objects/overview.html")
 
 
 @blueprint.route("/<object_type>/<object_id>")
-@acl(["user"])
 @formoptions(["projects", "users"])
 async def get_object(object_type: str, object_id: str):
     return await render_or_json(
@@ -90,7 +83,6 @@ async def get_object(object_type: str, object_id: str):
 
 @blueprint.route("/<object_type>")
 @blueprint.route("/<object_type>/search", methods=["POST"])
-@acl(["user"])
 @formoptions(["projects", "users"])
 async def get_objects(object_type: str):
     if request.method == "POST":
@@ -114,18 +106,7 @@ async def get_objects(object_type: str):
             )
 
         return await render_or_json(
-            "objects/includes/objects/table_body.html",
-            request.headers,
-            data={
-                "objects": [
-                    model_classes["list_row"][object_type].model_validate(row)
-                    for row in rows["items"]
-                ],
-                "page_size": rows["page_size"],
-                "page": rows["page"],
-                "pages": rows["total_pages"],
-                "elements": rows["total"],
-            },
+            "objects/includes/objects/table_body.html", request.headers, data=rows
         )
     else:
         return await render_template(
@@ -134,136 +115,135 @@ async def get_objects(object_type: str):
 
 
 @blueprint.route("/<object_type>", methods=["POST"])
-@acl(["user"])
 async def create_object(object_type: str):
     if object_type == "projects" and not "system" in session["acl"]:
-        raise ValueError("", L["Only administrators can create projects"])
+        raise ValueError("", "Only administrators can create projects")
 
     request.form_parsed["assigned_users"] = session["id"]
-    upsert_data = model_classes["add"][object_type].model_validate(request.form_parsed)
+
+    upsert_model = model_meta["add"][object_type]
+    upsert_data = upsert_model(**request.form_parsed)
 
     async with db:
         _unique_hits = await db.search(
             object_type,
             {
-                f: str(getattr(upsert_data, f))
-                for f in model_classes["unique_fields"][object_type]
+                f: getattr(upsert_data, f)
+                for f in model_meta["unique_fields"][object_type]
             },
         )
         if _unique_hits:
-            raise ValueError("name", L["Object exists"])
+            raise ValueError("name", "Object exists")
 
-        if hasattr(upsert_data, "assigned_project"):
+        if hasattr(upsert_data, "assigned_project") and upsert_data.assigned_project:
             if not await db.search(
                 "projects",
                 where={
                     "assigned_users": session["id"],
-                    "id": str(upsert_data.assigned_project),
+                    "id": upsert_data.assigned_project,
                 }
                 if not "system" in session["acl"]
-                else {"id": str(upsert_data.assigned_project)},
+                else {"id": upsert_data.assigned_project},
             ):
-                raise ValueError("assigned_project", L["Project is not accessible"])
+                raise ValueError("assigned_project", "Project is not accessible")
 
-        a = await db.upsert(object_type, upsert_data.id, deep_model_dump(upsert_data))
-        print(a)
+        await db.upsert(object_type, upsert_data.id, asdict(upsert_data))
 
     return trigger_notification(
         level="success",
         response_code=204,
-        title=L["Completed"],
-        message=L["Object created"],
+        title="Completed",
+        message="Object created",
     )
 
 
 @blueprint.route("/<object_type>/delete", methods=["POST"])
 @blueprint.route("/<object_type>/<object_id>", methods=["DELETE"])
-@acl(["user"])
 async def delete_object(object_type: str, object_id: str | None = None):
-    if request.method == "POST":
-        object_id = request.form_parsed.get("id")
+    object_ids = request._objects.keys()
 
-    object_ids = ensure_list(object_id)
     async with db:
         for id_ in object_ids:
+            if object_type == "projects":
+                for res in await db.search(
+                    "cars",
+                    where={
+                        "assigned_project": id_,
+                    },
+                ):
+                    await db.patch("cars", res["id"], {"assigned_project": None})
+
             await db.delete(object_type, id_)
 
     return trigger_notification(
         level="success",
         response_code=204,
-        title=L["Completed"],
-        message=L["Object removed"] if len(object_ids) == 1 else L["Objects modified"],
+        title="Completed",
+        message="Object removed" if len(object_ids) == 1 else "Objects removed",
     )
 
 
 @blueprint.route("/<object_type>/patch", methods=["POST"])
 @blueprint.route("/<object_type>/<object_id>", methods=["PATCH"])
-@acl(["user"])
 async def patch_object(object_type: str, object_id: str | None = None):
     object_ids = request._objects.keys()
-    patch_data = model_classes["patch"][object_type].model_validate(request.form_parsed)
+
+    patch_model = model_meta["patch"][object_type]
+    base_model = model_meta["base"][object_type]
+    patch_data = patch_model(**request.form_parsed)
 
     if not "system" in session["acl"]:
-        for f in model_classes["system_fields"][object_type]:
+        for f in model_meta["system_fields"][object_type]:
             if hasattr(patch_data, f):
                 setattr(patch_data, f, None)
 
-    if (
-        hasattr(patch_data, "location")
-        and isinstance(patch_data.location, Location)
-        and patch_data.location._is_valid
-        and patch_data.location.display_name == patch_data.location.coords
-    ):
-        try:
-            patch_data.location.display_name = await coords_to_display_name(
-                patch_data.location.coords
-            )
-        except (ValueError, ValidationError) as e:
-            pass
-
-    patch_data_dict = deep_model_dump(patch_data)
-
     async with db:
         for id_ in object_ids:
+            patched_object = replace(request._objects[id_], **patch_data.dump_patched())
+
             # Check for uniqueness
             unique_filters = {
-                f: getattr(patch_data, f) or getattr(request._objects[id_], f)
-                for f in model_classes["unique_fields"][object_type]
+                f: getattr(patched_object, f)
+                for f in model_meta["unique_fields"][object_type]
             }
-            _unique_hits = await db.search(
-                object_type, {k: str(v) for k, v in unique_filters.items()}
-            )
+            _unique_hits = await db.search(object_type, unique_filters)
             if _unique_hits and _unique_hits[0]["id"] != id_:
                 raise ValueError(
-                    model_classes["unique_fields"][object_type], L["Object exists"]
+                    model_meta["unique_fields"][object_type], "Object exists"
                 )
 
             # Check for project access
-            if hasattr(patch_data, "assigned_project"):
-                _projects = ensure_unique_list(
-                    [
-                        str(patch_data.assigned_project),
-                        str(request._objects[id_].assigned_project),
-                    ]
-                )
-                _project_hits = await db.search(
-                    "projects",
-                    where={
-                        "assigned_users": session["id"],
-                        "id": _projects,
-                    }
-                    if not "system" in session["acl"]
-                    else {"id": _projects},
-                )
+            if not "system" in session["acl"]:
+                if (
+                    hasattr(patch_data, "assigned_project")
+                    and patch_data.assigned_project
+                ):
+                    if request._objects[id_].assigned_project:
+                        _projects = unique_list(
+                            [
+                                patch_data.assigned_project,
+                                request._objects[id_].assigned_project,
+                            ]
+                        )
+                    else:
+                        _projects = [patched_object.assigned_project]
 
-                if set([p["id"] for p in _project_hits]) != set(_projects):
-                    raise ValueError("name", L["Project is not accessible"])
+                    _project_hits = await db.search(
+                        "projects",
+                        where={
+                            "assigned_users": session["id"],
+                            "id": _projects,
+                        },
+                    )
 
-            await db.patch(object_type, id_, patch_data_dict)
+                    if set([p["id"] for p in _project_hits]) != set(_projects):
+                        raise ValueError("name", "Project is not accessible")
+
+            await db.patch(object_type, id_, asdict(patched_object))
 
     return trigger_notification(
         level="success",
         response_code=204,
-        title=L["Completed"],
-        message=L["Object modified"] if len(object_ids) == 1 else L["Objects modified"],
+        title="Completed",
+        message="Object modified" if len(object_ids) == 1 else "Objects modified",
     )

@@ -1,12 +1,9 @@
 <div class="table-select grid-space-between">
-  {% if toggle_all_button and toggle_all_button == True %}
   <div>
-    <button class="secondary" _="on click call setCheckboxes(#{{ request.view_args.get("object_type") }}-table-body, 'toggle') end">All</button>
-    <button class="secondary" _="on click call setCheckboxes(#{{ request.view_args.get("object_type") }}-table-body, 'invert') end">Invert</button>
+    <button class="secondary" _="on click call setCheckboxes(#{{ request.view_args.get("object_type") }}-table-body, 'toggle') end">{{ L["All"] }}</button>
+    <button class="secondary" _="on click call setCheckboxes(#{{ request.view_args.get("object_type") }}-table-body, 'invert') end">{{ L["Invert"] }}</button>
   </div>
-  {% endif %}
 
-  {% if delete_button and delete_button == True %}
   <button data-loading-disable
     class="delete button-red"
     _="install confirmButton
@@ -17,6 +14,5 @@
     hx-post="/objects/{{ request.view_args.get("object_type") }}/delete"
     hx-target="#body-main"
     hx-trigger="confirmedButton throttle:200ms"
-    hx-include="[name='id']">Delete</button>
-  {% endif %}
+    hx-include="[name='id']">{{ L["Remove"] }}</button>
 </div>

@@ -1,21 +1,29 @@
 import json
 from config.defaults import OSM_EMAIL, HOSTNAME
-from components.models.coords import Literal, Location, validate_call
-from .requests import async_request
+from .requests import async_request, sync_request
 
 
-@validate_call
-async def coords_to_display_name(coords: str):
+def coords_to_display_name(coords: str):
     from components.database.states import STATE
 
-    location = Location.from_coords(coords)
+    if not isinstance(coords, str):
+        raise ValueError(f"'coords' must be a string, but got {type(coords).__name__}.")
 
-    if STATE.locations.get(location.coords):
-        return STATE.locations[location.coords]
+    try:
+        lat_str, lon_str = coords.split(",")
+        lat = float(lat_str)
+        lon = float(lon_str)
+        assert lon and lat
+    except (ValueError, TypeError, AssertionError):
+        raise ValueError(f"Invalid coordinate string: {coords}")
+
+    if STATE.locations.get(coords):
+        return STATE.locations[coords]
+
     else:
         try:
-            status_code, response_text = await async_request(
-                f"https://nominatim.openstreetmap.org/reverse?lat={location.lat}&lon={location.lon}&format=json&addressdetails=0&email={OSM_EMAIL}",
+            status_code, response_text = sync_request(
+                f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json&addressdetails=0&email={OSM_EMAIL}",
                 "GET",
                 headers={
                     "User-Agent": f"coords_to_display_name() - Thank you! - Contact: {OSM_EMAIL}",
@@ -24,21 +32,23 @@ async def coords_to_display_name(coords: str):
             )
             if status_code == 200:
                 response_text = json.loads(response_text)
-                STATE.locations[location.coords] = response_text["display_name"]
+                STATE.locations[coords] = response_text["display_name"]
                 return response_text["display_name"]
         except:
             return None
 
 
-@validate_call
-async def display_name_to_location(q: str):
+async def display_name_to_location(q: str) -> dict:
     from components.database.states import STATE
+
+    if not isinstance(q, str):
+        raise ValueError(f"'q' must be a string, but got {type(q).__name__}.")
 
     if q in STATE.locations:
         return STATE.locations[q]
     else:
         try:
-            location = None
+            result = {}
             status_code, response_text = await async_request(
                 f"https://nominatim.openstreetmap.org/search?q={q}&limit=1&format=json&email={OSM_EMAIL}",
                 "GET",
@@ -48,18 +58,11 @@ async def display_name_to_location(q: str):
                 },
             )
             if status_code == 200:
-                location = None
                 response_text = json.loads(response_text)
 
                 if response_text:
                     result = response_text[0]
-                    location = Location(
-                        lat=result["lat"],
-                        lon=result["lon"],
-                        display_name=result["display_name"],
-                    )
-
-                STATE.locations[q] = location
+                    STATE.locations[q] = result
 
         finally:
-            return location
+            return result

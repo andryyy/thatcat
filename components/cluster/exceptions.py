@@ -6,7 +6,7 @@ class ClusterException(Exception):
     pass
 
 
-class ClusterCommandFailed(ClusterException):
+class CommandFailed(ClusterException):
     pass
 
 
@@ -14,19 +14,15 @@ class LockException(ClusterException):
     pass
 
 
-class IncompleteClusterResponses(ClusterException):
+class IncomingDataError(ClusterException):
     pass
 
 
-class MonitoringTaskExists(ClusterException):
+class ResponseError(ClusterException):
     pass
 
 
-class UnknownPeer(ClusterException):
-    pass
-
-
-class ZombiePeer(ClusterException):
+class OfflinePeer(ClusterException):
     pass
 
 

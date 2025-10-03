@@ -3291,6 +3291,10 @@ header nav details.dropdown {
   display: inline-block;
 }
 
+#body-main li {
+  word-break: break-word;
+}
+
 :not(header) > details:not(.dropdown) > summary {
   color: #3c71f7 !important;
   word-break: break-word;

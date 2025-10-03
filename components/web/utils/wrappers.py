@@ -3,18 +3,9 @@ from .quart import abort, redirect, request, session, url_for, websocket
 from components.database import db
 from components.database.states import STATE
 from components.logs import logger
-from components.models.users import (
-    User,
-    UserSession,
-    TypeAdapter,
-    ValidationError,
-    Literal,
-    validate_call,
-    UUID,
-    ListRowUser,
-)
-from components.models.objects import model_classes as obj_model_classes
-from components.utils import ensure_list
+from components.models.users import User, UserSession
+from components.models.objects import model_meta
+from components.utils import ensure_list, unique_list
 from config import defaults
 from functools import wraps
 
@@ -28,7 +19,6 @@ def session_clear(preserved_keys: list = []) -> None:
         preserved_keys = defaults.PRESERVE_SESSION_KEYS
 
     restore_keys = set()
-
     for k in preserved_keys:
         session_key = session.get(k)
         if session_key:
@@ -45,7 +35,7 @@ def session_clear(preserved_keys: list = []) -> None:
 async def verify_session(acl: str | list) -> None:
     from components.models.users import USER_ACLS
 
-    acls = ensure_list(acl)
+    acls = unique_list(ensure_list(acl))
 
     if not session.get("id"):
         raise AuthException("Session ID missing")
@@ -57,7 +47,8 @@ async def verify_session(acl: str | list) -> None:
         if session["id"] not in STATE.session_validated:
             try:
                 async with db:
-                    user = User.model_validate(await db.get("users", session["id"]))
+                    user = await db.get("users", session["id"])
+                    user = User(**user)
 
                 STATE.session_validated.update({session["id"]: user.acl})
                 session["acl"] = user.acl
@@ -83,10 +74,7 @@ async def create_session_by_token(token):
                 "users",
                 {"login": token_user},
             )
-            if not user:
-                raise ValueError("Unknown user")
-
-            user = User.model_validate(user[0])
+            user = User(**user[0])
     except:
         session_clear()
         raise AuthException("User unknown")
@@ -94,15 +82,16 @@ async def create_session_by_token(token):
     if token_value not in user.profile.access_tokens:
         raise AuthException("Token unknown in user context")
 
-    user_session = UserSession(
-        login=user.login,
-        id=user.id,
-        acl=user.acl,
-        cred_id="",
-        lang=request.accept_languages.best_match(defaults.ACCEPT_LANGUAGES) or "en",
-        profile=user.profile,
-    )
-    for k, v in user_session.model_dump().items():
+    for k, v in asdict(
+        UserSession(
+            login=user.login,
+            id=user.id,
+            acl=user.acl,
+            cred_id="",
+            lang=request.accept_languages.best_match(defaults.ACCEPT_LANGUAGES) or "en",
+            profile=user.profile,
+        )
+    ).items():
         session[k] = v
 
 
@@ -152,6 +141,7 @@ def acl(acl_type):
                 return await fn(*args, **kwargs)
 
             except AuthException as e:
+                logger.critical(e)
                 client_addr = request.headers.get(
                     "X-Forwarded-For", request.remote_addr
                 )
@@ -177,8 +167,7 @@ def acl(acl_type):
     return check_acl
 
 
-@validate_call
-def formoptions(options: list[Literal[*obj_model_classes["types"], "users"]]):
+def formoptions(options: list):
     def inject_options(fn):
         @wraps(fn)
         async def wrapper(*args, **kwargs):
@@ -193,27 +182,24 @@ def formoptions(options: list[Literal[*obj_model_classes["types"], "users"]]):
                         rows = await db.list_rows("users", page_size=-1)
 
                     request.form_options[option] = {
-                        UUID(row["id"]): ListRowUser.model_validate(row)
-                        for row in rows["items"]
+                        row["id"]: row for row in rows["items"]
                     }
 
-                elif option in obj_model_classes["types"]:
+                elif option in model_meta["types"]:
                     async with db:
                         rows = await db.list_rows(option, page_size=-1)
 
                     request.form_options[option] = {
-                        UUID(row["id"]): obj_model_classes["list_row"][
-                            option
-                        ].model_validate(row)
-                        for row in rows["items"]
+                        row["id"]: row for row in rows["items"]
                     }
 
                     for k, v in request.form_options[option].items():
+                        request.form_options[option][k]["permitted"] = False
                         if (
                             "system" in session["acl"]
-                            or UUID(session["id"]) in v.assigned_users
+                            or session["id"] in v["assigned_users"]
                         ):
-                            request.form_options[option][k].permitted = True
+                            request.form_options[option][k]["permitted"] = True
 
             return await fn(*args, **kwargs)
 

@@ -1,41 +1,18 @@
-import asyncio
-import components.users
-import json
-
-from base64 import b64decode, b64encode
-from config import defaults
-from components.models.users import (
-    Auth,
-    TokenConfirmation,
-    TypeAdapter,
-    UserSession,
-    User,
-)
+from ..utils import *
+from ..utils.passkeys import *
 from components.logs import logger
-from components.utils import expire_key, deep_model_dump, utc_now_as_str
-from components.web.utils import *
-from components.web.utils.passkeys import *
+from components.models.users import *
+from components.utils import utc_now_as_str
+from config import defaults
 from secrets import token_urlsafe
+from uuid import uuid4
 
 blueprint = Blueprint("auth", __name__, url_prefix="/auth")
 
 
-@blueprint.before_request
-async def before_request():
-    global L
-    L = LANG[request.USER_LANG]
-
-
-@blueprint.context_processor
-async def load_context():
-    return {"L": L}
-
-
 @blueprint.route("/login/request/confirm/<request_token>")
 async def login_request_confirm(request_token: str):
-    try:
-        TypeAdapter(str).validate_python(request_token)
-    except:
+    if not isinstance(request_token, str) or request_token == "":
         return "", 200, {"HX-Redirect": "/"}
 
     token_status = STATE.sign_in_tokens.get(request_token, {}).get("status")
@@ -60,35 +37,27 @@ async def login_request_confirm(request_token: str):
 )
 @acl("any")
 async def login_request_confirm_modal(request_token: str):
-    try:
-        TypeAdapter(str).validate_python(request_token)
-    except:
-        return "", 204
+    if not isinstance(request_token, str) or request_token == "":
+        return "", 204, {"HX-Redirect": "/"}
 
     if request.method == "POST":
         if (
             request_token in STATE.sign_in_tokens
             and STATE.sign_in_tokens[request_token]["status"] == "awaiting"
         ):
-            STATE.sign_in_tokens[request_token].update(
+            STATE.sign_in_tokens.set_and_expire(
+                request_token,
                 {
                     "status": "confirmed",
                     "credential_id": "",
-                }
+                },
+                5,
             )
-            current_app.add_background_task(
-                expire_key,
-                STATE.sign_in_tokens,
-                request_token,
-                10,
-            )
-
             await ws_htmx(session["login"], "delete:#auth-login-request", "")
-
             return "", 204
 
         return trigger_notification(
-            level="warning",
+            level="error",
             response_code=403,
             title="Confirmation failed",
             message="Token denied",
@@ -106,35 +75,37 @@ async def login_request():
 # /auth/login/request/start
 @blueprint.route("/login/request", methods=["POST"])
 async def login_request_start():
-    request_data = Auth.parse_obj(request.form_parsed)
+    authentication = Authentication(**request.form_parsed)
 
     session_clear()
 
-    try:
-        user_id = await components.users.what_id(login=request_data.login)
-        user = await components.users.get(user_id=user_id)
-    except (ValidationError, ValueError):
-        return validation_error([{"loc": ["login"], "msg": f"User is not available"}])
+    async with db:
+        user = await db.search(
+            "users",
+            {"login": authentication.login},
+        )
+
+    if not user:
+        return ValueError("login", "User is not available")
+
+    user = User(**user[0])
 
     request_token = token_urlsafe()
 
-    STATE.sign_in_tokens[request_token] = {
-        "intention": f"Authenticate user: {request_data.login}",
-        "created": utc_now_as_str(),
-        "status": "awaiting",
-        "requested_login": request_data.login,
-    }
-
-    current_app.add_background_task(
-        expire_key,
-        STATE.sign_in_tokens,
+    STATE.sign_in_tokens.set_and_expire(
         request_token,
+        {
+            "intention": f"Authenticate {user.login}",
+            "created": utc_now_as_str(),
+            "status": "awaiting",
+            "requested_login": user.login,
+        },
         defaults.AUTH_REQUEST_TIMEOUT,
     )
 
     if user.profile.permit_auth_requests:
         await ws_htmx(
-            request_data.login,
+            user.login,
             "beforeend",
             f'<div id="auth-permit" hx-trigger="load" hx-get="/auth/login/request/confirm/internal/{request_token}"></div>',
         )
@@ -151,27 +122,24 @@ async def login_request_start():
 # Polled every second by unknown user that issued a login request
 @blueprint.route("/login/request/<request_token>")
 async def login_request_check(request_token: str):
-    try:
-        TypeAdapter(str).validate_python(request_token)
-    except:
-        session.clear()
-        return "", 200, {"HX-Redirect": "/"}
-
     token_status, requested_login, credential_id = map(
         STATE.sign_in_tokens.get(request_token, {}).get,
         ["status", "requested_login", "credential_id"],
     )
 
     if token_status == "confirmed":
-        try:
-            user_id = await components.users.what_id(login=requested_login)
-            user = await components.users.get(user_id=user_id)
-        except ValidationError as e:
-            return validation_error(
-                [{"loc": ["login"], "msg": f"User is not available"}]
+        async with db:
+            user = await db.search(
+                "users",
+                {"login": str(requested_login)},
             )
 
-        for k, v in (
+        if not user:
+            raise ValueError("login", "User is not available")
+
+        user = User(**user[0])
+
+        for k, v in asdict(
             UserSession(
                 login=user.login,
                 id=user.id,
@@ -180,9 +148,7 @@ async def login_request_check(request_token: str):
                 lang=request.accept_languages.best_match(defaults.ACCEPT_LANGUAGES),
                 profile=user.profile,
             )
-            .model_dump()
-            .items()
-        ):
+        ).items():
             session[k] = v
 
     else:
@@ -197,71 +163,68 @@ async def login_token():
     if request.method == "GET":
         return await render_template("auth/login/token/token.html")
 
-    try:
-        request_data = Auth.parse_obj(request.form_parsed)
-        STATE.terminal_tokens[request_data.token] = {
-            "intention": f"Authenticate user: {request_data.login}",
-            "created": utc_now_as_str(),
-            "status": "awaiting",
-            "login": request_data.login,
-        }
-        current_app.add_background_task(
-            expire_key,
-            STATE.terminal_tokens,
-            request_data.token,
-            120,
+    authentication = Authentication(**request.form_parsed)
+
+    async with db:
+        user = await db.search(
+            "users",
+            {"login": authentication.login},
         )
 
-    except ValidationError as e:
-        return validation_error(e.errors())
+    if not user:
+        raise ValueError("login", "User is not available")
+
+    user = User(**user[0])
+
+    STATE.terminal_tokens.set_and_expire(
+        authentication.token,
+        {
+            "intention": f"Authenticate user: {authentication.login}",
+            "created": utc_now_as_str(),
+            "status": "awaiting",
+            "user_id": user.id,
+        },
+        defaults.AUTH_REQUEST_TIMEOUT,
+    )
 
     return await render_template(
         "auth/login/token/confirm.html",
-        token=request_data.token,
+        token=authentication.token,
     )
 
 
 @blueprint.route("/login/token/verify", methods=["POST"])
 async def login_token_verify():
-    try:
-        request_data = TokenConfirmation.parse_obj(request.form_parsed)
+    token_confirmation = TokenConfirmation(**request.form_parsed)
+    token_status, token_user_id, token_confirmation_code = map(
+        STATE.terminal_tokens.get(token_confirmation.token, {}).get,
+        ["status", "user_id", "code"],
+    )
+    STATE.terminal_tokens.pop(token_confirmation.token, None)
 
-        token_status, token_login, token_confirmation_code = map(
-            STATE.terminal_tokens.get(request_data.token, {}).get,
-            ["status", "login", "code"],
+    if (
+        token_status != "confirmed"
+        or token_confirmation_code != token_confirmation.confirmation_code
+    ):
+        return validation_error(
+            [{"loc": ["confirmation_code"], "msg": "Confirmation code is invalid"}]
         )
-        STATE.terminal_tokens.pop(request_data.token, None)
 
-        if (
-            token_status != "confirmed"
-            or token_confirmation_code != request_data.confirmation_code
-        ):
-            return validation_error(
-                [
-                    {
-                        "loc": ["confirmation_code"],
-                        "msg": "Confirmation code is invalid",
-                    }
-                ]
-            )
+    async with db:
+        user = await db.get("users", token_user_id)
 
-        user_id = await components.users.what_id(login=token_login)
-        user = await components.users.get(user_id=user_id)
+    user = User(**user)
 
-    except ValidationError as e:
-        return validation_error(e.errors())
-
-    for k, v in (
+    for k, v in asdict(
         UserSession(
-            login=token_login,
+            login=user.login,
             id=user.id,
             acl=user.acl,
+            cred_id=credential_id,
             lang=request.accept_languages.best_match(defaults.ACCEPT_LANGUAGES),
             profile=user.profile,
         )
-        .model_dump()
-        .items()
-    ):
+    ).items():
         session[k] = v
 
     return "", 200, {"HX-Redirect": "/profile", "HX-Refresh": False}
@@ -273,11 +236,9 @@ async def login_webauthn_options():
         allowed_credentials=None,  # w resident key
     )
 
-    STATE._challenge_options[gen_opts["challenge"]] = gen_opts["options"]
-    current_app.add_background_task(
-        expire_key,
-        STATE._challenge_options,
+    STATE._challenge_options.set_and_expire(
         gen_opts["challenge"],
+        gen_opts["options"],
         defaults.WEBAUTHN_CHALLENGE_TIMEOUT,
     )
 
@@ -287,25 +248,33 @@ async def login_webauthn_options():
 @blueprint.route("/register/webauthn/options", methods=["POST"])
 async def register_webauthn_options():
     if not "id" in session:
-        request_data = Auth.parse_obj(request.form_parsed)
+        request_data = Authentication(**request.form_parsed)
+        async with db:
+            user = await db.search("users", {"login": request_data.login})
+
+        if user:
+            raise ValueError("login", "User is not available")
+
         gen_opts = generate_registration_options(
             user_id=str(uuid4()),
             user_name=request_data.login,
             exclude_credentials=[],
         )
     else:
-        user = await components.users.get(user_id=session["id"])
+        async with db:
+            user = await db.get("users", session["id"])
+
+        user = User(**user)
+
         gen_opts = generate_registration_options(
             user_id=session["id"],
             user_name=session["login"],
-            exclude_credentials=[c.id for c in user.credentials],
+            exclude_credentials=[bytes.fromhex(c.id) for c in user.credentials],
         )
 
-    STATE._challenge_options[gen_opts["challenge"]] = gen_opts["options"]
-    current_app.add_background_task(
-        expire_key,
-        STATE._challenge_options,
+    STATE._challenge_options.set_and_expire(
         gen_opts["challenge"],
+        gen_opts["options"],
         defaults.WEBAUTHN_CHALLENGE_TIMEOUT,
     )
 
@@ -322,7 +291,7 @@ async def auth_login_verify():
         login_opts = STATE._challenge_options.get(challenge_response)
         STATE._challenge_options.pop(challenge_response, None)
         if not login_opts:
-            return L["Timeout exceeded"], 409
+            return "Timeout exceeded", 409
 
         credential_id = b64url_decode(auth_response["rawId"])
         user_id = b64url_decode(auth_response["response"]["userHandle"]).decode("utf-8")
@@ -335,19 +304,20 @@ async def auth_login_verify():
                     "id": user_id,
                 },
             )
-            if not user:
-                return L["Unknown passkey"], 409
 
-            user = User.model_validate(user[0])
+        if not user:
+            return "Unknown passkey", 409
+
+        user = User(**user[0])
 
         for credential in user.credentials:
-            if credential.id == credential_id:
+            if credential.id == credential_id.hex():
                 if credential.active == False:
-                    return L["Passkey is disabled"], 409
+                    return "Passkey is disabled", 409
                 matched_user_credential = credential
                 break
         else:
-            return L["Unknown passkey"], 409
+            return "Unknown passkey", 409
 
         verification = verify_authentication_response(
             assertion_response=auth_response,
@@ -357,47 +327,39 @@ async def auth_login_verify():
         )
 
         if not user.active:
-            return L["User is not allowed to login"], 409
+            return "User is not allowed to sign in", 409
+
+        for credential in user.credentials:
+            if credential.id == credential_id.hex():
+                credential.last_login = utc_now_as_str()
+                if verification["counter_supported"] != 0:
+                    matched_user_credential.sign_count = verification["sign_count"]
+                break
+
+        user_dict = asdict(user)
 
         async with db:
-            for credential in user.credentials:
-                if credential.id == credential_id:
-                    credential.last_login = utc_now_as_str()
-                    if verification["counter_supported"] != 0:
-                        matched_user_credential.sign_count = verification["sign_count"]
-                    break
-
-            user_dict = deep_model_dump(user)
             await db.patch("users", user_id, {"credentials": user_dict["credentials"]})
 
     except Exception as e:
-        logger.critical(e)
+        logger.error(f"Login error: {e}", exc_info=True)
         return "Login error", 409
 
     request_token = session.get("request_token")
 
     if request_token:
-        """
-        Not setting session login and id for device that is confirming the proxy authentication
-        Gracing 10s for the awaiting party to catch up an almost expired key
-        """
-        STATE.sign_in_tokens[request_token].update(
+        STATE.sign_in_tokens.set_and_expire(
+            request_token,
             {
                 "status": "confirmed",
-                "credential_id": credential_raw_id.hex(),
-            }
+                "credential_id": credential_id.hex(),
+            },
+            5,
         )
-        current_app.add_background_task(
-            expire_key,
-            STATE.sign_in_tokens,
-            request_token,
-            10,
-        )
-        session["request_token"] = None
-
+        session.pop("request_token", None)
         return "", 202
 
-    for k, v in (
+    for k, v in asdict(
         UserSession(
             login=user.login,
             id=user.id,
@@ -406,9 +368,7 @@ async def auth_login_verify():
             lang=request.accept_languages.best_match(defaults.ACCEPT_LANGUAGES),
             profile=user.profile,
         )
-        .model_dump()
-        .items()
-    ):
+    ).items():
         session[k] = v
 
     return "", 200
@@ -428,9 +388,8 @@ async def register_webauthn():
             return "Timeout exceeded", 409
 
         user_id = b64url_decode(reg_opts["user"]["id"]).decode("ascii")
-        login = reg_opts["user"]["name"]
 
-        if session.get("id") and session.get("id") != user_id:
+        if session.get("id") and session["id"] != user_id:
             raise ValueError("User ID mismatch")
 
         verification = verify_registration_response(
@@ -438,7 +397,7 @@ async def register_webauthn():
             expected_challenge=reg_opts["challenge"],
         )
     except Exception as e:
-        logger.critical(e)
+        logger.warning(f"An error occured registering a passkey: {e}")
         return trigger_notification(
             level="error",
             response_code=409,
@@ -446,25 +405,24 @@ async def register_webauthn():
             message="An error occured registering the passkey",
         )
 
-    try:
-        async with ClusterLock("users"):
-            if not session.get("id"):
-                await components.users.create(data={"id": user_id, "login": login})
-            await components.users.create_credential(
-                user_id=user_id,
-                data={
-                    "id": verification["credential_id"],
-                    "public_key": verification["public_key_pem"],
-                    "sign_count": verification["sign_count"],
-                },
+    new_credential = CredentialAdd(
+        **{
+            "id": verification["credential_id"],
+            "public_key": verification["public_key_pem"],
+            "sign_count": verification["sign_count"],
+        }
+    )
+    async with db:
+        if not session.get("id"):
+            user = UserAdd(
+                **{"login": reg_opts["user"]["name"], "credentials": [new_credential]}
             )
-    except Exception as e:
-        logger.critical(e)
-        return trigger_notification(
-            level="error",
-            response_code=409,
-            title="Passkey Fehler",
-            message="Es trat ein Fehler beim Hinzufügen des Passkeys auf",
-        )
+            await db.upsert("users", user_id, asdict(user))
+        else:
+            user = await db.get("users", user_id)
+            user = User(**user)
+            user.credentials.append(new_credential)
+            user_dict = asdict(user)
+            await db.patch("users", user_id, {"credentials": user_dict["credentials"]})
 
     return "", 204

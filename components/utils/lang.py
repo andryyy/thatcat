@@ -17,4 +17,3 @@ class LangDict(dict):
 
 
 LANG = {k: LangDict(lang=k) for k in ACCEPT_LANGUAGES}
-L = LangDict()

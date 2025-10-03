@@ -28,7 +28,7 @@
     set locations to notificationData.locations or []
   
     if notificationData.level == 'validationError'
-      set notificationData.title to 'Data validation failed'
+      set notificationData.title to '{{ L["Data validation failed"] }}'
       if length of locations > 0
         if (closest <form/> to event's target)
           repeat for loc in locations

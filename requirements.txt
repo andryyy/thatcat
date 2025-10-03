@@ -1,5 +1,3 @@
 quart
 jinja2
-pydantic
-email-validator
 python-magic

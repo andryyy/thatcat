@@ -4,12 +4,8 @@ import traceback
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta
 
-
 SUCCESS_LEVEL = 25
 CRITICAL_LEVEL = 50
-logging.addLevelName(SUCCESS_LEVEL, "SUCCESS")
-logging.addLevelName(CRITICAL_LEVEL, "CRITICAL")
-
 LOG_COLORS = {
     "DEBUG": "\033[94m",
     "INFO": "\033[96m",
@@ -21,6 +17,9 @@ LOG_COLORS = {
     "BOLD": "\033[1m",
 }
 
+logging.addLevelName(SUCCESS_LEVEL, "SUCCESS")
+logging.addLevelName(CRITICAL_LEVEL, "CRITICAL")
+
 
 class JSONFormatter(logging.Formatter):
     def __init__(self, text):
@@ -28,10 +27,7 @@ class JSONFormatter(logging.Formatter):
         self.text = text
 
     def format(self, record):
-        exc_text = None
-        if record.exc_info:
-            exc_text = traceback.format_exc()
-
+        exc_text = traceback.format_exc() if record.exc_info else None
         log_entry = {
             "text": self.text,
             "record": {
@@ -70,10 +66,7 @@ class JSONFormatter(logging.Formatter):
 
 class PlainTextFormatter(logging.Formatter):
     def format(self, record):
-        exc_text = None
-        if record.exc_info:
-            exc_text = traceback.format_exc()
-
+        exc_text = traceback.format_exc() if record.exc_info else None
         log_time = datetime.utcfromtimestamp(record.created).strftime(
             "%Y-%m-%d %H:%M:%S.%f"
         )[:-3]
@@ -96,7 +89,6 @@ class Logger:
             if isinstance(handler, RotatingFileHandler):
                 self.logger.removeHandler(handler)
                 handler.close()
-
         handler = RotatingFileHandler(
             filepath,
             maxBytes=max_size_mb * 1024 * 1024,
@@ -107,23 +99,23 @@ class Logger:
         handler.setFormatter(JSONFormatter(text(None)))
         self.logger.addHandler(handler)
 
-    def log(self, level, message):
-        self.logger.log(level, message, stacklevel=2)
+    def log(self, level, message, exc_info=None):
+        self.logger.log(level, message, exc_info=exc_info, stacklevel=2)
 
-    def info(self, message):
-        self.logger.info(message, stacklevel=2)
+    def info(self, message, exc_info=None):
+        self.logger.info(message, exc_info=exc_info, stacklevel=2)
 
-    def warning(self, message):
-        self.logger.warning(message, stacklevel=2)
+    def warning(self, message, exc_info=None):
+        self.logger.warning(message, exc_info=exc_info, stacklevel=2)
 
-    def error(self, message):
-        self.logger.error(message, stacklevel=2)
+    def error(self, message, exc_info=None):
+        self.logger.error(message, exc_info=exc_info, stacklevel=2)
 
-    def debug(self, message):
-        self.logger.debug(message, stacklevel=2)
+    def debug(self, message, exc_info=None):
+        self.logger.debug(message, exc_info=exc_info, stacklevel=2)
 
-    def success(self, message):
-        self.logger.log(SUCCESS_LEVEL, message, stacklevel=2)
+    def success(self, message, exc_info=None):
+        self.logger.log(SUCCESS_LEVEL, message, exc_info=exc_info, stacklevel=2)
 
-    def critical(self, message):
-        self.logger.log(CRITICAL_LEVEL, message, exc_info=True, stacklevel=2)
+    def critical(self, message, exc_info=None):
+        self.logger.log(CRITICAL_LEVEL, message, exc_info=exc_info, stacklevel=2)

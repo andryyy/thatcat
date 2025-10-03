@@ -1,26 +1,12 @@
 import asyncio
-import glob
 import json
 import os
 
-from components.models.assets import Asset
-from components.utils.assets import request_asset
 from components.utils.osm import display_name_to_location
-from components.web.utils import *
+from ..utils import *
 
 blueprint = Blueprint("main", __name__, url_prefix="/")
 HS_DIR = os.path.abspath("components/web/templates/_hs")
-
-
-@blueprint.before_request
-async def before_request():
-    global L
-    L = LANG[request.USER_LANG]
-
-
-@blueprint.context_processor
-async def load_languages():
-    return {"L": L}
 
 
 @blueprint.route("/")
@@ -43,19 +29,29 @@ async def hs_script(script_file: str):
 @blueprint.route("/location/search/<q>")
 @acl("user")
 async def location_lookup(q: str):
-    location = await display_name_to_location(q)
-    if location:
-        return jsonify(location.model_dump(mode="json"))
-    return jsonify()
+    return await display_name_to_location(q)
 
 
 @blueprint.route("/asset/<asset_id>")
 @acl("any")
-async def asset(asset_id: UUID | str):
-    if await request_asset(cluster, asset_id):
-        return await send_from_directory("assets/", asset_id)
-    else:
+async def asset(asset_id: str):
+    asset_path = os.path.abspath(f"assets/{asset_id}")
+    if not asset_path.startswith(os.path.abspath("./assets")):
         return "", 404
+
+    if os.path.exists(f"assets/{asset_id}"):
+        return await send_from_directory("assets/", asset_id)
+
+    for peer in cluster.peers.get_established():
+        try:
+            await cluster.files.fileget(
+                f"assets/{asset_id}", f"assets/{asset_id}", peer
+            )
+            return await send_from_directory("assets/", asset_id)
+        except FileGetException:
+            pass
+
+    return "", 404
 
 
 @blueprint.route("/logout", methods=["POST", "GET"])
@@ -68,7 +64,7 @@ async def logout():
 @websocket_acl("any")
 async def ws():
     await websocket.send(
-        f'<span class="no-text-decoration" data-tooltip="{L['Connected']}" id="ws-indicator" hx-swap-oob="outerHTML">🟢</span>'
+        '<span class="no-text-decoration" id="ws-indicator" hx-swap-oob="outerHTML">🟢</span>'
     )
     data_dict = None
     while not current_app.stop_event.is_set():

@@ -1,5 +1,6 @@
 import asyncio
-import re
+import random
+import string
 
 from config import defaults
 from contextlib import suppress
@@ -8,327 +9,358 @@ from .exceptions import *
 from .ssl import get_ssl_context
 from components.logs import logger
 from components.models.cluster import (
-    confloat,
-    Callable,
     ConnectionStatus,
-    CritErrors,
+    ErrorMessages,
     IncomingData,
     Role,
-    SendCommandReturn,
-    validate_call,
-    ValidationError,
+    MetaData,
+    READER_DATA_PATTERN,
 )
-from components.utils import ensure_unique_list, ntime_utc_now
+from components.utils import ntime_utc_now, unique_list, ensure_list
+
+ALPHABET = string.ascii_lowercase + string.digits
 
 
 class Server:
     def __init__(self, port):
         self.locks = dict()
         self.port = port
-        self.callback_tickets = dict()
+        self.callbacks = dict()
         self.temp_data = dict()
         self.stop_event = None
         self.server_limit = 104857600  # 100 MiB
         self.tasks = set()
-        self.locking_timeout = 10.0  # time to spend acquiring a lock
-        self.lock_timeout = 4  # ttl for an acquired lock
-        self.receiving = asyncio.Condition()
+        self.locking_timeout = 30.0  # time to spend acquiring a lock
+        self._sending_incr = 0
 
     def register_command(self, plugin: "CommandPlugin"):
         self.registry.register(plugin)
 
-    def _release_tables(self, lock_id, tables):
-        for t in tables:
-            if lock_id != self.locks[t]["id"]:
-                logger.error("Table release failed due to lock id mismatch")
-            elif t in self.locks:
+    def _release_locks(self, lock_id: str, lock_objects: list | set):
+        for l in ensure_list(unique_list(lock_objects)):
+            if lock_id != self.locks[l]["id"]:
+                logger.error("Cannot release due to id<>lock_object mismatch")
+            elif l in self.locks:
                 with suppress(RuntimeError):
-                    self.locks[t]["lock"].release()
-                self.locks[t]["id"] = None
+                    self.locks[l]["lock"].release()
+                self.locks[l]["id"] = None
 
-    async def read_command(
-        self, reader: asyncio.StreamReader, raddr: str
-    ) -> tuple[str, str, dict]:
-        bytes_to_read = int.from_bytes(await reader.readexactly(4), "big")
-        input_bytes = await reader.readexactly(bytes_to_read)
+    def _incoming_parser(self, input_bytes: bytes) -> IncomingData:
+        try:
+            input_decoded = input_bytes.strip().decode("utf-8")
+            match = READER_DATA_PATTERN.search(input_decoded)
+            data = match.groupdict()
 
-        input_decoded = input_bytes.strip().decode("utf-8")
-        data, _, meta = input_decoded.partition(" :META ")
-        ticket, _, cmd = data.partition(" ")
-
-        patterns = [
-            r"NAME (?P<name>\S+)",
-            r"CLUSTER (?P<cluster>\S+)",
-            r"STARTED (?P<started>\S+)",
-            r"LEADER (?P<leader>\S+)",
-        ]
-
-        match = re.search(" ".join(patterns), meta)
-        meta_dict = match.groupdict()
-        name = meta_dict["name"]
-
-        if not name in self.peers.remotes:
-            raise UnknownPeer(name)
-
-        if raddr not in self.peers.remotes[name].ips:
-            raise UnknownPeer(raddr)
-
-        self.peers.remotes[name].leader = meta_dict["leader"]
-        self.peers.remotes[name].started = float(meta_dict["started"])
-        self.peers.remotes[name].cluster = meta_dict["cluster"]
-
-        msg = cmd[:150] + (cmd[150:] and "...")
-        logger.debug(f"← [{name}][{ticket}] - {msg}")
-
-        return IncomingData(ticket=ticket, cmd=cmd, sender=name)
+            return IncomingData(
+                ticket=data["ticket"],
+                cmd=data["cmd"],
+                payload=data["payload"],
+                meta=MetaData(
+                    cluster=data["cluster"],
+                    leader=data["leader"],
+                    started=data["started"],
+                    name=data["name"],
+                ),
+            )
+        except Exception as e:
+            logger.critical(e)
+            raise IncomingDataError(e)
 
     async def incoming_handler(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ):
-        peer_init = False
-        raddr, *_ = writer.get_extra_info("peername")
         socket, *_ = writer.get_extra_info("socket").getsockname()
+        raddr, *_ = writer.get_extra_info("peername")
+        peer_init = False
 
         if socket and raddr in defaults.CLUSTER_CLI_BINDINGS:
             return await cli_processor((reader, writer))
 
+        peer = self.peers.get_peer_by_raddr(raddr)
+
+        if peer.streams.ingress:
+            if peer.streams.ingress != (reader, writer):
+                raise Exception(f"Duplicate connection from {raddr}/{peer.meta.name}")
+        else:
+            peer.streams.ingress = (reader, writer)
+
         while True:
             try:
-                incoming_data = await self.read_command(reader, raddr)
+                bytes_to_read = int.from_bytes(await reader.readexactly(4), "big")
+                input_bytes = await reader.readexactly(bytes_to_read)
+                logger.debug(f"Read {bytes_to_read + 4} bytes from {raddr}")
 
-                if not peer_init and not incoming_data.cmd == "BYE":
-                    if self.peers.remotes[incoming_data.sender].streams.ingress:
-                        await self.send_command(
-                            CritErrors.ZOMBIE.response,
-                            incoming_data.sender,
-                            ticket=incoming_data.ticket,
-                        )
-                        break
-                    self.peers.remotes[incoming_data.sender].streams.ingress = (
-                        reader,
-                        writer,
-                    )
-                    self.peers.remotes[incoming_data.sender].graceful_shutdown = False
-                    await self.monitor.peer(incoming_data.sender)
+                data = self._incoming_parser(input_bytes)
+
+                if data.meta.name != peer.name:
+                    raise Exception(f"Expected {data.meta.name}, got {peer.name}")
+
+                if not peer.streams.egress:
+                    con, status = await self.peers.connect(data.meta.name)
+                    if not con:
+                        raise Exception(f"Error connecting {data.meta.name}: {status}")
+
+                if peer.meta and (float(data.meta.started) < float(peer.meta.started)):
+                    raise Exception(f"Inplausible started stamp from {data.meta.name}")
+
+                peer.meta = data.meta
+
+                if not peer_init and data.cmd != "BYE" and not self.stop_event.is_set():
                     peer_init = True
+                    await self.monitor.peer(peer.meta.name)
 
-            except (asyncio.exceptions.IncompleteReadError, ConnectionResetError):
+                for plugin in self.registry.all():
+                    if data.cmd == plugin.name:
+                        reply_command = await plugin.dispatch(self, data)
+                        if reply_command:
+                            await self.send_command(
+                                reply_command,
+                                peer.meta.name,
+                                ticket=data.ticket,
+                            )
+                        break
+                else:
+                    await self.send_command(
+                        ErrorMessages.UNKNOWN_COMMAND.response,
+                        peer.meta.name,
+                        ticket=data.ticket,
+                    )
+            except CommandFailed:
+                await self.send_command(
+                    ErrorMessages.COMMAND_FAILED.response,
+                    peer.meta.name,
+                    ticket=data.ticket,
+                )
+                continue
+            except (asyncio.exceptions.IncompleteReadError, ConnectionResetError) as e:
+                logger.info(f"{raddr} closed connection: {e}")
+                break
+            except ClusterException as e:
+                logger.error(f"Reading input data from {raddr} failed : {e}")
+                break
+            except Exception as e:
+                logger.critical(f"Unhandled exception while reading from {raddr}: {e}")
                 break
             except TimeoutError as e:
                 if str(e) == "SSL shutdown timed out":
                     break
                 raise
-            except ValidationError as e:
-                logger.critical(e)
-                logger.error(f"Invalid data received from {raddr}")
-                continue
-            except MonitoringTaskExists:
-                await self.send_command(
-                    CritErrors.ZOMBIE.response,
-                    incoming_data.sender,
-                    ticket=incoming_data.ticket,
-                )
-                break
 
-            try:
-                for plugin in self.registry.all():
-                    if incoming_data.cmd.startswith(plugin.name):
-                        reply_command = await plugin.dispatch(self, incoming_data)
-                        if reply_command:
-                            await self.send_command(
-                                reply_command,
-                                incoming_data.sender,
-                                ticket=incoming_data.ticket,
-                            )
-                        break
-                else:
-                    await self.send_command(
-                        CritErrors.UNKNOWN_COMMAND.response,
-                        incoming_data.sender,
-                        ticket=incoming_data.ticket,
-                    )
-
-                async with self.receiving:
-                    self.receiving.notify_all()
-
-            except ClusterCommandFailed:
-                await self.send_command(
-                    CritErrors.COMMAND_FAILED.response,
-                    incoming_data.sender,
-                    ticket=incoming_data.ticket,
-                )
-            except ConnectionResetError:
-                break
-
-    @validate_call
     async def send_command(
         self,
-        cmd,
-        peers: str | list | None = None,
+        cmd: str,
+        peers: str | list = "*",
         ticket: str | None = None,
-    ) -> SendCommandReturn | None:
+        raise_err=True,
+        timeout: float = 5.0,
+    ) -> str | None:
         if not self.stop_event:
-            raise ServerNotRunning()
+            raise ServerNotRunning(self.stop_event)
 
-        if self.stop_event.is_set() and cmd != "BYE":
-            logger.warning(
-                f"[→ NOT sending BYE commands while shutting down [{ticket}]"
-            )
-            return SendCommandReturn(ticket="", receivers=[])
-
-        if not ticket:
-            ticket = ntime_utc_now()
-        ticket = str(ticket)
-
-        if ticket not in self.callback_tickets and not cmd.startswith("ACK"):
-            self.callback_tickets[ticket] = set()
-
-        if not peers or peers == "*":
-            peers = [
-                p
-                for p in self.peers.remotes.keys()
-                if not self.peers.remotes[p].graceful_shutdown
+        if not all(
+            isinstance(v, t)
+            for v, t in [
+                (raise_err, bool),
+                (timeout, (float, int)),
+                (ticket, (str, type(None))),
+                (peers, (str, list)),
+                (cmd, str),
             ]
+        ):
+            raise ValueError("Invalid argument type")
 
-        receivers = []
-        for name in ensure_unique_list(peers):
-            if name not in self.peers.remotes:
-                raise UnknownPeer(name)
+        timeout = float(timeout)
+        cmd_name, _, payload = cmd.partition(" ")
 
-            async with self.peers.remotes[name].lock:
-                if self.peers.remotes[name].graceful_shutdown:
+        valid_commands = {p.name for p in self.registry.all()}
+        if cmd_name not in valid_commands:
+            raise ValueError(f"Invalid command {cmd_name}")
+
+        is_callback = cmd_name in {"OK", "ERR", "DATA"}
+        requires_callback = not is_callback and cmd_name not in {"BYE", "INIT"}
+
+        if self.stop_event.is_set() and cmd_name != "BYE":
+            return None
+
+        if is_callback:
+            if not ticket:
+                raise ValueError(f"Callback command {cmd_name} is missing ticket")
+        elif not requires_callback:
+            if ticket:
+                raise ValueError(f"No-return command {cmd_name} cannot have a ticket")
+            ticket = "NORET"
+        else:
+            if not ticket:
+                ticket = f"{cmd_name}-{self.peers.local.name}-{self._sending_incr}"
+                self._sending_incr += 1
+            elif ticket in self.callbacks:
+                raise ValueError(
+                    f"Ticket {ticket} is already awaiting callbacks for {cmd_name}"
+                )
+
+            self.callbacks[ticket] = {
+                "cmd": cmd_name,
+                "responses": {},
+                "failed_peers": set(),
+                "receivers": set(),
+            }
+
+        final_peers = set()
+        if peers == "*":
+            for peer, remote in self.peers.remotes.items():
+                if not remote.graceful_shutdown:
+                    final_peers.add(peer)
+        else:
+            peers_to_check = peers if isinstance(peers, list) else [peers]
+            for peer in peers_to_check:
+                remote = self.peers.remotes.get(peer)
+                if remote and not remote.graceful_shutdown:
+                    final_peers.add(peer)
+                elif not remote:
                     logger.warning(
-                        f"[→ NOT sending to {name}][{ticket}] - Peer left gracefully"
+                        f"Skipping unknown peer {peer} ({cmd_name}/{ticket})"
                     )
-                    continue
+                elif remote.graceful_shutdown:
+                    logger.warning(
+                        f"Skipping shutdown peer {peer} ({cmd_name}/{ticket})"
+                    )
 
-                con, status = await self.peers.connect(name)
-                if con:
-                    reader, writer = con
-                    buffer_data = [
-                        ticket,
-                        cmd,
-                        ":META",
-                        f"NAME {self.peers.local.name}",
-                        "CLUSTER {cluster}".format(
-                            cluster=self.peers.local.cluster or "?CONFUSED"
-                        ),
-                        f"STARTED {self.peers.local.started}",
-                        "LEADER {leader}".format(
-                            leader=self.peers.local.leader or "?CONFUSED"
-                        ),
-                    ]
-                    buffer_bytes = " ".join(buffer_data).encode("utf-8")
-                    writer.write(len(buffer_bytes).to_bytes(4, "big"))
-                    writer.write(buffer_bytes)
-                    await writer.drain()
+        buffer_data = [
+            ticket,
+            f"{cmd_name} {payload}",
+            ":META",
+            f"NAME {self.peers.local.name}",
+            f"CLUSTER {self.peers.local.cluster or '?CONFUSED'}",
+            f"STARTED {self.peers.local.started}",
+            f"LEADER {self.peers.local.leader or '?CONFUSED'}",
+        ]
+        buffer_bytes = " ".join(buffer_data).encode("utf-8")
 
-                    msg = cmd[:150] + (cmd[150:] and "...")
-                    logger.debug(f"→ [{name}][{ticket}] - {msg}")
+        async def _write_data(peer_lock, writer, buffer_bytes):
+            async with peer_lock:
+                writer.write(len(buffer_bytes).to_bytes(4, "big"))
+                writer.write(buffer_bytes)
+                await writer.drain()
 
-                    receivers.append(name)
-                else:
-                    logger.warning(f"Cannot send to peer {name} - {status}")
+        writer_tasks = set()
+        for peer in final_peers:
+            con, status = await self.peers.connect(peer)
+            if con:
+                reader, writer = con
+                writer_tasks.add(
+                    _write_data(self.peers.remotes[peer].lock, writer, buffer_bytes)
+                )
+                if requires_callback:
+                    self.callbacks[ticket]["responses"][peer] = None
+                    self.callbacks[ticket]["receivers"].add(peer)
+                    self.callbacks[ticket]["failed_peers"].add(peer)
+            else:
+                logger.error(f"Connection to peer {peer} failed: {status}")
 
-        return SendCommandReturn(ticket=ticket, receivers=receivers)
+        if requires_callback:
+            if not self.callbacks[ticket]["receivers"]:
+                logger.warning(f"Ticket {ticket} had no receivers")
+                self.callbacks.pop(ticket, None)
+                return True, {}
+            self.callbacks[ticket]["barrier"] = asyncio.Barrier(
+                len(self.callbacks[ticket]["receivers"]) + 1
+            )
 
-    @validate_call
-    async def await_receivers(
-        self,
-        send_command_return: SendCommandReturn,
-        raise_err: bool = True,
-        timeout: confloat(le=10.0) = 5.0,
-    ):
-        ticket = send_command_return.ticket
-        receivers = send_command_return.receivers
+        await asyncio.gather(*writer_tasks)
 
-        if not receivers:
-            logger.warning(f"Ticket {ticket} had no receivers")
-            self.callback_tickets.pop(ticket, None)
+        log = f"▲ {cmd_name} to {', '.join(final_peers)}"
+        if is_callback:
+            log += f", calling back {ticket}"
+        elif requires_callback:
+            log += f", requesting callback to {ticket}"
+        logger.info(f"{log} ({len(buffer_bytes) + 4} bytes)")
+
+        if not requires_callback:
             return True, {}
-
-        if not ticket in self.callback_tickets:
-            raise IncompleteClusterResponses("Ticket is not awaiting callbacks")
 
         try:
             async with asyncio.timeout(timeout):
-                callbacks = self.callback_tickets.get(ticket, set())
-                while not all(r in [p for p, _ in callbacks] for r in receivers):
-                    await self.receiving.wait()
-                    callbacks = self.callback_tickets.get(ticket, set())
+                await self.callbacks[ticket]["barrier"].wait()
         except TimeoutError:
-            logger.error("Timeout waiting for receivers")
+            logger.error(f"Timed out waiting for ticket {ticket} ({cmd_name})")
+            await self.callbacks[ticket]["barrier"].abort()
         finally:
-            self.callback_tickets.pop(ticket, None)
-            responses = {
-                peer: CritErrors(response)
-                if response in CritErrors._value2member_map_
-                else response
-                for peer, response in callbacks
-            }
-            responses["_missing"] = [
-                r for r in receivers if r not in [p for p, _ in callbacks]
-            ]
+            callback_info = self.callbacks.pop(ticket, {})
+            responses = callback_info.get("responses", {})
+            failed_peers = callback_info.get("failed_peers", set())
 
-            if (
-                any(isinstance(r, CritErrors) for r in responses.values())
-                or responses["_missing"]
-            ):
-                logger.error(responses)
+            for peer in responses:
+                responses[peer] = ErrorMessages._value2member_map_.get(
+                    responses[peer], responses[peer]
+                )
+
+            if failed_peers:
                 if raise_err:
-                    raise IncompleteClusterResponses(responses)
+                    raise ResponseError(responses)
                 return False, responses
 
             return True, responses
 
-    async def release(self, lock_id, tables: list = ["main"]) -> str:
+    async def release(self, lock_id: str, lock_objects: list | set) -> None:
+        if not isinstance(lock_id, str) or lock_id == "":
+            raise ValueError(f"The 'lock_id' parameter must be a non-empty string")
+
+        lock_objects = ensure_list(unique_list(lock_objects))
+
+        if not lock_objects:
+            raise ValueError(
+                f"The 'lock_objects' parameter must be a non-empty list or set"
+            )
+
         if self.peers.local.role == Role.FOLLOWER:
             try:
-                async with self.receiving:
-                    sent = await self.send_command(
-                        f"UNLOCK {lock_id} {','.join(tables)}", self.peers.local.leader
-                    )
-                    await self.await_receivers(sent, raise_err=True)
-            except IncompleteClusterResponses as e:
-                print(e)
+                await self.send_command(
+                    f"UNLOCK {lock_id} {','.join(lock_objects)}",
+                    self.peers.local.leader,
+                    raise_err=True,
+                )
+            except ResponseError as e:
                 raise LockException("Leader did not respond properly to unlock request")
         elif self.peers.local.role == Role.LEADER:
-            self._release_tables(lock_id, tables)
+            self._release_locks(lock_id, lock_objects)
 
-    async def acquire_lock(self, tables: list) -> str:
-        locked_tables = set()
-        lock_id = str(ntime_utc_now())
+    async def acquire_lock(self, lock_objects: list | set) -> str:
+        locked_objects = set()
+        start = ntime_utc_now()
+        lock_id = "".join(random.choices(ALPHABET, k=8))
+        lock_objects = ensure_list(unique_list(lock_objects))
+
+        if not lock_objects:
+            raise ValueError(
+                f"The 'lock_objects' parameter must be a non-empty list or set"
+            )
 
         try:
             if self.peers.local.role == Role.LEADER:
-                for t in tables:
-                    if t not in self.locks:
-                        self.locks[t] = {
+                for l in lock_objects:
+                    if l not in self.locks:
+                        self.locks[l] = {
                             "lock": asyncio.Lock(),
                             "id": None,
                         }
-                    await self.locks[t]["lock"].acquire(),
-                    locked_tables.add(t)
-                    self.locks[t]["id"] = lock_id
+                    await self.locks[l]["lock"].acquire(),
+                    locked_objects.add(l)
+                    self.locks[l]["id"] = lock_id
             elif self.peers.local.role == Role.FOLLOWER:
                 if not self.peers.local.leader:
                     raise ClusterException("Leader is not elected yet")
 
-                while (ntime_utc_now() - float(lock_id)) < self.locking_timeout:
-                    async with self.receiving:
-                        sent = await self.send_command(
-                            f"LOCK {lock_id} {','.join(tables)}",
-                            self.peers.local.leader,
-                        )
-                        result, responses = await self.await_receivers(
-                            sent, raise_err=False
-                        )
-
-                    responses = list(responses.values())
-                    if "BUSY" in responses:
+                while (ntime_utc_now() - start) < self.locking_timeout:
+                    result, responses = await self.send_command(
+                        f"LOCK {lock_id} {','.join(lock_objects)}",
+                        self.peers.local.leader,
+                        raise_err=False,
+                    )
+                    if responses[self.peers.local.leader] == "BUSY":
+                        await asyncio.sleep(0.1)
                         continue
                     elif not result:
-                        if CritErrors.PEERS_MISMATCH in responses:
+                        if ErrorMessages.PEERS_MISMATCH in responses:
                             raise LockException("Lock rejected due to inconsistency")
                         else:
                             raise LockException(
@@ -343,17 +375,19 @@ class Server:
 
         except Exception as e:
             if self.peers.local.role == Role.LEADER:
-                self._release_tables(lock_id, locked_tables)
+                self._release_locks(lock_id, locked_objects)
             if isinstance(e, ClusterException):
                 raise
             elif isinstance(e, TimeoutError):
                 raise LockException(f"Timeout acquiring local lock")
             raise LockException(f"Unhandled exception: {str(e)}")
 
-    async def run(self, stop_event: Callable, post_stop_event: Callable) -> None:
-        server = await asyncio.start_server(
+    async def run(
+        self, stop_event: asyncio.Event, post_stop_event: asyncio.Event
+    ) -> None:
+        self.server = await asyncio.start_server(
             self.incoming_handler,
-            self.peers.local._all_bindings_as_str,
+            self.peers.local.server_bindings,
             self.port,
             ssl=get_ssl_context("server"),
             limit=self.server_limit,
@@ -362,40 +396,22 @@ class Server:
         self.stop_event = stop_event
 
         logger.info(
-            f"Listening on {self.port} on address {' and '.join(self.peers.local._all_bindings_as_str)}..."
+            f"Listening on {self.port} on address {' and '.join(self.peers.local.server_bindings)}..."
         )
 
-        async with server:
-            binds = [s.getsockname()[0] for s in server.sockets]
-            for local_rbind in self.peers.local._bindings_as_str:
+        async with self.server:
+            binds = [s.getsockname()[0] for s in self.server.sockets]
+            for local_rbind in self.peers.local.server_bindings:
                 if local_rbind not in binds:
                     logger.critical(f"Could not bind requested address {local_rbind}")
                     stop_event.set()
                     return
 
-            async with self.receiving:
-                sent = await self.send_command("INIT", "*")
-                _, responses = await self.await_receivers(sent, raise_err=False)
-
-            if CritErrors.ZOMBIE in responses.values():
-                logger.critical(
-                    f"Peer {name} has not yet disconnected a previous session: {status}"
-                )
-                stop_event.set()
-
-            async def _sync_on_first_complete(event):
-                await event.wait()
-                await self.files.sync_folder("assets")
+            sent = await self.send_command("INIT", "*")
 
             t = asyncio.create_task(self.monitor.server(), name="tickets")
             self.tasks.add(t)
             t.add_done_callback(self.tasks.discard)
-
-            waiter_task = asyncio.create_task(
-                _sync_on_first_complete(self.peers._first_complete)
-            )
-            self.tasks.add(waiter_task)
-            waiter_task.add_done_callback(self.tasks.discard)
 
             try:
                 await stop_event.wait()
@@ -404,12 +420,13 @@ class Server:
                 stop_event.set()
             finally:
                 logger.info("Starting cluster shutdown")
-
                 if self.peers.get_established():
                     try:
                         await self.send_command("BYE", "*")
-                    except ConnectionResetError:
+                    except (asyncio.CancelledError, ConnectionResetError):
                         pass
+                    except Exception as e:
+                        logger.warning(f"Unhandled exception while sending BYE: {e}")
 
                 for t in self.tasks.copy():
                     t.cancel()

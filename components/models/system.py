@@ -1,32 +1,55 @@
-from components.utils import ensure_list, utc_now_as_str
-from components.models import *
+from components.utils import utc_now_as_str
+from components.models.helpers import *
+from dataclasses import dataclass, field, fields
 
 
-class SystemSettings(BaseModel):
-    _form_id: str = PrivateAttr(default=f"form-{str(uuid4())}")
-
-    GOOGLE_VISION_API_KEY: str = Field(
-        default="",
-        json_schema_extra={
-            "title": "Google Vision API",
-            "description": "API key for Google Vision",
-            "type": "text",
-            "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
-        },
-    )
+@dataclass
+class SystemSettingsBase:
+    id: str
+    updated: str
+    doc_version: int | str
 
 
-class SystemSettingsBase(BaseModel):
-    @computed_field
-    @property
-    def id(self) -> str:
-        return "1"
-
-    details: SystemSettings = SystemSettings()
+@dataclass
+class SystemSettingsData:
+    GOOGLE_VISION_API_KEY: str | None = None
 
 
-class UpdateSystemSettings(SystemSettingsBase):
-    @computed_field
-    @property
-    def updated(self) -> str:
-        return utc_now_as_str()
+@dataclass
+class SystemSettingsPatch(SystemSettingsData):
+    id: str = field(default=None, init=False, repr=False)
+    updated: str = field(default_factory=utc_now_as_str, init=False)
+
+    def dump_patched(self):
+        return {
+            f.name: getattr(self, f.name)
+            for f in fields(self)
+            if getattr(self, f.name) is not None
+        }
+
+
+@dataclass
+class SystemSettings(SystemSettingsData, SystemSettingsBase):
+    def __post_init__(self) -> None:
+        if not self.id == "1":
+            raise ValueError("id", "'id' must be '1'")
+
+        if not isinstance(self.updated, str) or to_str(self.updated.strip()) == "":
+            raise ValueError("updated", "'updated' must be a non-empty string")
+
+        self.doc_version = to_int(self.doc_version)
+
+        if self.GOOGLE_VISION_API_KEY is not None:
+            self.GOOGLE_VISION_API_KEY = (
+                to_str(self.GOOGLE_VISION_API_KEY.strip()) or None
+            )
+
+
+form = {
+    "GOOGLE_VISION_API_KEY": {
+        "title": "Google Vision API",
+        "description": "API key for Google Vision",
+        "type": "text",
+        "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
+    }
+}

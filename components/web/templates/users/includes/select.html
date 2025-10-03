@@ -1,5 +1,9 @@
 <div class="table-select grid-space-between">
-  <button class="secondary" _="on click call setCheckboxes(#system-users-table-body, 'toggle') end">All</button>
+  <div>
+    <button class="secondary" _="on click call setCheckboxes(#system-users-table-body, 'toggle') end">{{ L["All"] }}</button>
+    <button class="secondary" _="on click call setCheckboxes(#system-users-table-body, 'invert') end">{{ L["Invert"] }}</button>
+  </div>
+
   <button data-loading-disable
     class="delete button-red"
     _="install confirmButton
@@ -10,5 +14,5 @@
     hx-post="/users/delete"
     hx-target="#body-main"
     hx-trigger="confirmedButton throttle:200ms"
-    hx-include="[name='id']">Delete</button>
+    hx-include="[name='id']">{{ L["Remove"] }}</button>
 </div>

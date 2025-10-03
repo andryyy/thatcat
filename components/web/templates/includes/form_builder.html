@@ -2,7 +2,7 @@
 
 DATA FIELDS
   current_data: dict
-  schema: BaseModel.model_json_schema()
+  schema: dict
   fields: Optional[list]                # An optional list of fields to enable
                                         # is not part of a user's ACL
   root_key: Optional[str]               # A string to encapsulate a name in,
@@ -10,8 +10,8 @@ DATA FIELDS
 
 #}
 
-{% for k, v in schema.properties.items() if (k in fields or not fields) %}
-  {% set form_id = current_data._form_id ~ "-" ~ k %}
+{% for k, v in schema.items() if (k in fields or not fields) %}
+  {% set form_id = generate_form_id(k) %}
   {% set field_name = root_key ~ "." ~ k if root_key else k %}
 
   {% if v.type in ["text", "email", "number"] %}
@@ -30,10 +30,12 @@ DATA FIELDS
 
     <fieldset data-loading-disable data-field-type="location">
       <label>{{ L[v.title] }}</label>
+
       {% if v.description %}
       <small>{{ L[v.description|safe] }}</small>
       {% endif %}
-      {% if current_data[k] and current_data[k]._is_valid%}
+
+      {% if current_data[k] %}
       <div id="leaflet-{{ form_id }}" _="install selectFromLeaflet(
         formId: '{{ form_id }}',
         options: {
@@ -77,7 +79,7 @@ DATA FIELDS
                 <summary>{{ L["Projects"] }}</summary>
                 <ul dir="rtl" id="leaflet-additional-markers-{{ form_id }}">
                 {% set current_project = current_data.assigned_project or object.id %}
-                {% for project_id, project_data in request.form_options.projects.items() if (project_data.permitted == True or project_id == current_project) and project_data.location._is_valid %}
+                {% for project_id, project_data in request.form_options.projects.items() if (project_data.permitted == True or project_id == current_project) and project_data.location %}
                 <li>
                   <label>
                     <input data-marker='{
@@ -99,9 +101,12 @@ DATA FIELDS
           </div>
           <input id="leaflet-search-query-{{ form_id }}" type="text" placeholder="Suchbegriff" form="_none">
         </div>
-        <input type="hidden" id="leaflet-lat-{{ form_id }}" name="{{ field_name }}.lat" value="{{ current_data[k].lat or 0.0 }}"/>
-        <input type="hidden" id="leaflet-lon-{{ form_id }}" name="{{ field_name }}.lon" value="{{ current_data[k].lon or 0.0 }}"/>
-        <input type="hidden" id="leaflet-display-name-{{ form_id }}" name="{{ field_name }}.display_name" value="{{ current_data[k].display_name or '' }}"/>
+        <input autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+          type="hidden" id="leaflet-lat-{{ form_id }}" name="{{ field_name }}.lat" value="{{ current_data[k].lat or 0.0 }}"/>
+        <input autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+          type="hidden" id="leaflet-lon-{{ form_id }}" name="{{ field_name }}.lon" value="{{ current_data[k].lon or 0.0 }}"/>
+        <input autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+          type="hidden" id="leaflet-display-name-{{ form_id }}" name="{{ field_name }}.display_name" value="{{ current_data[k].display_name or '' }}"/>
       </div>
     </fieldset>
 
@@ -117,7 +122,7 @@ DATA FIELDS
       {% if current_data[k] %}
         {% for asset in current_data[k] %}
         <details>
-          <summary>Anlage {{ loop.index }} - "{{ asset.filename }}"</summary>
+          <summary>{{ L["Attachment"] }} {{ loop.index }} - "{{ asset.filename }}"</summary>
           {% if asset.mime_type.startswith("image/") %}
           <img src="/asset/{{ asset.id }}" alt="- {{ asset.filename }}"/>
           {% endif %}
@@ -184,7 +189,7 @@ DATA FIELDS
       <div data-field-type="vault" _="install vaultConfig(formId: '{{ form_id }}', isInit: {{ "true" if current_data[k] else "false" }})">
         <input id="{{ form_id }}" type="hidden" {{ v.input_extra|safe }}
           name="{{ field_name }}"
-          value='{{ current_data[k]|tojson }}'/>
+          value='{{ current_data[k] or "" }}'/>
         {% if not current_data[k] %}
         <p>{{ L["Setup vault"] }}</p>
         <fieldset>
@@ -250,7 +255,7 @@ DATA FIELDS
         name="{{ field_name }}"
         id="{{ form_id }}">
         {% for user_id, user_data in request.form_options.users.items() %}
-          <option value="{{ user_id }}" {{ "selected" if user_id in current_data[k] }}>{{ user_data.login }}</option>
+          <option value="{{ user_id }}" {{ "selected" if user_id in current_data[k]|string }}>{{ user_data.login }}</option>
         {% endfor %}
       </select>
       {% if v.description %}
@@ -326,26 +331,23 @@ DATA FIELDS
   {% elif v.type == "project" %}
     <fieldset data-loading-disable data-field-type="project">
     {% set permitted_projects = request.form_options.projects.values() | selectattr("permitted", "eq", True) | list %}
-    {% if not current_data[k] and not permitted_projects %}
-      <label for="{{ form_id }}">{{ L[v.title] }}</label>
-      <p><mark>{{ L["There is no assignable project"] }}</mark></p>
-    {% else %}
-      <label for="{{ form_id }}">{{ L[v.title] }}</label>
-      <select {{ v.input_extra|safe }}
-        name="{{ field_name }}"
-        id="{{ form_id }}">
-        <option disabled selected>{{ L["Please select"] }}</option>
-        {% for project_id, project_data in request.form_options.projects.items() %}
-          {%- if project_data.permitted == True -%}
-          <option value="{{ project_id }}" {{ "selected" if project_id == current_data[k] }}>{{ project_data.name }}</option>
-          {% elif project_id == current_data[k] %}
-          <option value="{{ project_id }}" selected>⚠️ {{ project_data.name }}</option>
-          {%- endif -%}
-        {% endfor %}
-      </select>
-      {% if v.description %}
-      <small>{{ L[v.description|safe] }}</small>
-      {% endif %}
+    <label for="{{ form_id }}">{{ L[v.title] }}</label>
+    <select {{ v.input_extra|safe }}
+      name="{{ field_name }}"
+      id="{{ form_id }}">
+      {% for project_id, project_data in request.form_options.projects.items() %}
+        {%- if project_data.permitted == True -%}
+        <option value="{{ project_id }}" {{ "selected" if project_id == current_data[k]|string }}>{{ project_data.name }}</option>
+        {% elif project_id == current_data[k] %}
+        <option value="{{ project_id }}" selected>⚠️ {{ project_data.name }}</option>
+        {%- endif -%}
+      {% else %}
+        <option value="" selected>{{ L["No assignment"] }}</option>
+      {% endfor %}
+      <option value="" {{ "selected" if not current_data[k] }}>{{ L["No assignment"] }}</option>
+    </select>
+    {% if v.description %}
+    <small>{{ L[v.description|safe] }}</small>
     {% endif %}
     </fieldset>
 

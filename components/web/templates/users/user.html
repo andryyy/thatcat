@@ -92,7 +92,7 @@
         {% endif %}
         {% for credential in user.credentials %}
         <fieldset>
-          {% if session["cred_id"] == credential.id|hex %}
+          {% if session["cred_id"] == credential.id %}
             <mark>{{ L["Signed in"] }}</mark>
           {% endif %}
           <div _="install inlineHtmxRename()"
@@ -100,20 +100,20 @@
           data-patch-parameter="friendly_name"
           spellcheck="false"
           hx-disinherit="*"
-          hx-patch="/users/{{ user.id }}/credential/{{ credential.id|hex }}"
+          hx-patch="/users/{{ user.id }}/credential/{{ credential.id }}"
           hx-trigger="editContent">
             {{- credential.friendly_name -}}
           </div>
           <div>
             <a href="#" class="{{ "color-red" if not credential.active else "color-green"}}"
-              hx-patch="/users/{{ user.id }}/credential/{{ credential.id|hex }}"
+              hx-patch="/users/{{ user.id }}/credential/{{ credential.id }}"
               hx-vals='js:{"active": {{ "true" if not credential.active else "false"}}}'
               hx-params="active">{{ L["Passkey disabled"] if not credential.active else L["Passkey enabled"] }}</a>
             <a href="#" class="color-red"
               hx-confirm="Delete passkey?"
               _="install confirmButton"
               hx-trigger="confirmedButton throttle:200ms"
-              hx-delete="/users/{{ user.id }}/credential/{{ credential.id|hex }}">{{ L["Remove"] }}</a>
+              hx-delete="/users/{{ user.id }}/credential/{{ credential.id }}">{{ L["Remove"] }}</a>
           </div>
           <small>{{ L["Last sign in"] }}:
             {% if credential.last_login %}

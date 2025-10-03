@@ -19,7 +19,7 @@ def trigger_notification(
         "response_code": response_code,
         "title": title,
         "message": message,
-        "additional_triggers": additional_triggers,
+        "additional_triggers": {k: "*" for k in additional_triggers},
     }
 
     if level in ["system", "user"]:
@@ -38,8 +38,8 @@ def trigger_notification(
                 {
                     "notification": {
                         "level": level,
-                        "title": title,
-                        "message": message,
+                        "title": LANG[request.USER_LANG][title],
+                        "message": LANG[request.USER_LANG][message],
                         "duration": duration,
                     },
                     **additional_triggers,
@@ -99,7 +99,8 @@ def validation_error(
             "errors": errors,
             "response_code": response_code,
             "error_msgs": error_msgs,
-        }
+        },
+        exc_info=True,
     )
     return (
         "",
@@ -111,7 +112,7 @@ def validation_error(
                     "notification": {
                         "level": "validationError",
                         "locations": locations,
-                        "message": error_msgs,
+                        "message": [LANG[request.USER_LANG][e] for e in error_msgs],
                         "duration": 7000,
                     }
                 }

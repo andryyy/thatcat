@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-import asyncio, json, zlib, base64, warnings
+import asyncio, json, zlib, base64, contextvars
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Set, Tuple
 from collections import OrderedDict
 from contextlib import asynccontextmanager
+from components.logs import logger
+from components.utils import ensure_list
+
 
 try:
     import msgpack
@@ -13,10 +16,22 @@ except Exception:
 
 JSON = Dict[str, Any]
 
+_changed_ctx = contextvars.ContextVar("_changed_ctx", default={})
+_deleted_ctx = contextvars.ContextVar("_deleted_ctx", default={})
+_locks_ctx = contextvars.ContextVar("_locks_ctx", default={})
+_snapshots_ctx = contextvars.ContextVar("_snapshots_ctx", default={})
+
+
+def _reset_context_vars():
+    _changed_ctx.set({})
+    _deleted_ctx.set({})
+    _locks_ctx.set({})
+    _snapshots_ctx.set({})
+
 
 class StorageCodec:
     def __init__(self, kind: str = "msgpack"):
-        kind = (kind or "json").lower()
+        kind = (kind or "msgpack").lower()
         if kind not in {"json", "msgpack"}:
             raise ValueError("codec must be 'json' or 'msgpack'")
         if kind == "msgpack" and msgpack is None:
@@ -26,14 +41,16 @@ class StorageCodec:
         self.kind = kind
 
     def dumps(self, obj: dict) -> bytes:
-        if self.kind == "json":
+        if self.kind == "msgpack":
+            return msgpack.dumps(obj, use_bin_type=True)
+        elif self.kind == "json":
             return json.dumps(obj, ensure_ascii=False).encode("utf-8")
-        return msgpack.dumps(obj, use_bin_type=True)
 
     def loads(self, data: bytes) -> dict:
-        if self.kind == "json":
+        if self.kind == "msgpack":
+            return msgpack.loads(data, raw=False)
+        elif self.kind == "json":
             return json.loads(data.decode("utf-8"))
-        return msgpack.loads(data, raw=False)
 
 
 def _get_all(doc: Any, path: str) -> List[Any]:
@@ -108,6 +125,9 @@ class _LRU:
     def delete(self, key):
         self.od.pop(key, None)
 
+    def __contains__(self, key):
+        return key in self.od
+
 
 class Database:
     def __init__(
@@ -118,35 +138,37 @@ class Database:
         self.main_path = self.base / main_file
         self._open = False
         self._manifest: JSON = {}
+        self._peer_manifests: Dict[str, JSON] = {}
         self._indexes: Dict[str, Dict[str, Dict[Any, Set[str]]]] = {}
         self._lists: Dict[str, Dict[str, Any]] = {}
         self._cache = _LRU(max_entries=2048)
-        self._changed: Dict[str, Set[str]] = {}
-        self._deleted: Dict[str, Set[str]] = {}
-        self._open_version_snapshot: int = 0
         self._locks: Dict[Tuple[str, str], asyncio.Lock] = {}
         self._codec = StorageCodec(codec)
-        self._cluster = None
-        self._replicate_changes = False
-        self._suppress_replication = False
+        if self.main_path.exists():
+            self._manifest = json.loads(self.main_path.read_text(encoding="utf-8"))
+        else:
+            self._manifest = {"tables": {}}
+
+        if not _changed_ctx.get():
+            _changed_ctx.set({})
+        if not _deleted_ctx.get():
+            _deleted_ctx.set({})
 
     def _validate_id(self, id_: str):
+        if not id_:
+            raise ValueError("id must be non‑empty")
         if not isinstance(id_, str):
             raise TypeError("id must be str")
         if "/" in id_ or "\\" in id_ or id_.startswith("."):
-            raise ValueError("invalid id")
+            raise ValueError(f"Invalid document id {id_!r}")
 
     def _resolve_doc_path(self, table: str, id_: str) -> Path:
         self._validate_id(id_)
         tdir = (self.base / table).resolve()
         p = (self.base / table / id_).resolve()
         if p.parent != tdir:
-            raise ValueError("invalid id")
+            raise ValueError(f"Invalid document id {id_!r}")
         return p
-
-    def set_cluster(self, cluster, *, replicate_changes: bool = True):
-        self._cluster = cluster
-        self._replicate_changes = replicate_changes
 
     def _lock_for(self, table: str, id_: str) -> asyncio.Lock:
         key = (table, id_)
@@ -154,55 +176,83 @@ class Database:
             self._locks[key] = asyncio.Lock()
         return self._locks[key]
 
+    async def do_rollback(self, cluster_peers: list = []):
+        try:
+            snapshots = _snapshots_ctx.get()
+            if not snapshots:
+                logger.debug("Nothing to rollback")
+                return
+            for table in snapshots:
+                await self.apply_snapshot(table, snapshots[table])
+            if cluster_peers:
+                comp_sync = await self.make_sync_from_docs(snapshots)
+                _, comp_b64 = comp_sync.split(" ", 1)
+                for peer in cluster_peers:
+                    await self.cluster.send_command(
+                        f"DBSYNC LAZY {comp_b64}", peer, raise_err=True
+                    )
+        except Exception as e:
+            logger.critical(e)
+            logger.error("Rollback failed")
+
     async def __aenter__(self):
-        await self.open()
-        self._changed = {}
-        self._deleted = {}
-        self._open_version_snapshot = self._manifest.get("version", 0)
+        _reset_context_vars()
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
-        await self.close()
-        self._changed = {}
-        self._deleted = {}
-        self._open_version_snapshot = 0
+        sync_str = await self.sync_out()
+        if sync_str and not exc:
+            try:
+                _, b64 = sync_str.split(" ", 1)
+                ok_peers = []
+                failed = False
 
-    async def open(self):
-        if self._open:
-            return
-        if self.main_path.exists():
-            txt = await asyncio.to_thread(self.main_path.read_text, encoding="utf-8")
-            self._manifest = json.loads(txt)
-        else:
-            self._manifest = {"version": 0, "tables": {}}
-        self._open = True
+                for peer in self.cluster.peers.get_established():
+                    result, _ = await self.cluster.send_command(
+                        f"DBSYNC {b64}", peer, raise_err=False
+                    )
+                    if result:
+                        ok_peers.append(peer)
+                    else:
+                        failed = True
 
-    async def close(self):
-        if not self._open:
-            return
-        tmp = self.main_path.with_suffix(self.main_path.suffix + ".tmp")
-        await asyncio.to_thread(tmp.write_text, json.dumps(self._manifest, indent=2))
-        await asyncio.to_thread(tmp.replace, self.main_path)
-        self._open = False
+                if failed:
+                    await asyncio.shield(self.do_rollback(ok_peers))
+                    logger.error(
+                        "Replication failed on at least one peer; rolled back everywhere."
+                    )
+            except Exception as e:
+                logger.critical(e)
 
-    def _ensure_open(self):
-        if not self._open:
-            raise RuntimeError("Database not open")
+        elif exc:
+            logger.error(f"Rolling back local changes due to error: {exc}.")
+            await asyncio.shield(self.do_rollback())
+
+        async with self._lock_for("aexit", "1"):
+            locks = _locks_ctx.get()
+            for doc_id, lock_id in locks.items():
+                await asyncio.shield(self.cluster.release(lock_id, [doc_id]))
+            self.main_path.write_text(json.dumps(self._manifest, indent=2))
+
+    def _changed_dict(self) -> dict:
+        return _changed_ctx.get()
+
+    def _deleted_dict(self) -> dict:
+        return _deleted_ctx.get()
 
     def _tbl(self, table: str) -> Dict[str, Any]:
         return self._manifest.setdefault("tables", {}).setdefault(
             table, {"doc_versions": {}}
         )
 
-    async def table_version(self, table: str) -> int:
+    def table_version(self, table: str) -> int:
         t = self._tbl(table)
         return sum(int(v) for v in t["doc_versions"].values())
 
-    async def doc_version(self, table: str, id_: str) -> int:
+    def doc_version(self, table: str, id_: str) -> int:
         return int(self._tbl(table)["doc_versions"].get(id_, 0))
 
     async def ids(self, table: str) -> List[str]:
-        self._ensure_open()
         tdir = self.base / table
         if not tdir.exists():
             return []
@@ -215,7 +265,6 @@ class Database:
         )
 
     async def get(self, table: str, id_: str) -> Optional[JSON]:
-        self._ensure_open()
         key = (table, id_)
         cached = self._cache.get(key)
         if cached is not None:
@@ -232,17 +281,19 @@ class Database:
             doc = self._codec.loads(data)
             if isinstance(doc, dict):
                 doc.setdefault("id", id_)
+                doc.setdefault("doc_version", self.doc_version(table, id_))
             self._cache.put(key, doc)
             return doc
 
-    def _read_disk_nocache(self, table: str, id_: str) -> Optional[JSON]:
+    async def _read_disk_nocache(self, table: str, id_: str) -> Optional[JSON]:
         path = self._resolve_doc_path(table, id_)
         if not path.exists():
             return None
-        data = path.read_bytes()
+        data = await asyncio.to_thread(path.read_bytes)
         doc = self._codec.loads(data)
         if isinstance(doc, dict):
             doc.setdefault("id", id_)
+            doc.setdefault("doc_version", self.doc_version(table, id_))
         return doc
 
     async def upsert(
@@ -252,23 +303,52 @@ class Database:
         doc: JSON,
         *,
         replace: bool = True,
+        base_version: Optional[int] = 0,
     ) -> None:
-        if self._cluster and self._replicate_changes and not self._suppress_replication:
-            await self._replicate_ops(table, [("upsert", id_, doc, replace)])
-            return
-        await self._upsert_local(table, id_, doc, replace=replace)
+        if base_version != 0:
+            if self.doc_version(table, id_) > base_version:
+                raise ValueError("Document changed, please reload the form")
+        await self._do_ops(
+            table,
+            kind="upsert",
+            id_=id_,
+            doc=doc,
+            replace=replace,
+            incoming_version=None,
+        )
 
-    async def patch(self, table: str, id_: str, changes: JSON) -> None:
-        if self._cluster and self._replicate_changes and not self._suppress_replication:
-            await self._replicate_ops(table, [("patch", id_, changes, False)])
-            return
-        await self._upsert_local(table, id_, changes, replace=False)
+    async def patch(
+        self,
+        table: str,
+        id_: str,
+        changes: JSON,
+        base_version: Optional[int] = 0,
+    ) -> None:
+        if base_version != 0:
+            if self.doc_version(table, id_) > base_version:
+                raise ValueError("Document changed, please reload the form")
+        await self._do_ops(
+            table,
+            kind="patch",
+            id_=id_,
+            doc=changes,
+            replace=False,
+            incoming_version=None,
+        )
 
-    async def delete(self, table: str, id_: str) -> None:
-        if self._cluster and self._replicate_changes and not self._suppress_replication:
-            await self._replicate_ops(table, [("delete", id_, None, False)])
-            return
-        await self._delete_local(table, id_)
+    async def delete(
+        self,
+        table: str,
+        id_: str,
+    ) -> None:
+        await self._do_ops(
+            table,
+            kind="delete",
+            id_=id_,
+            doc=None,
+            replace=False,
+            incoming_version=None,
+        )
 
     def _update_indexes_for_doc_change(
         self, table: str, *, id_: str, old_doc: Optional[JSON], new_doc: Optional[JSON]
@@ -281,6 +361,7 @@ class Database:
                     try:
                         s = mapping.get(v)
                     except TypeError:
+                        logger.warning(f"Type Error for {v}")
                         continue
                     if s:
                         s.discard(id_)
@@ -301,11 +382,11 @@ class Database:
         doc: JSON,
         *,
         replace: bool,
+        incoming_version: Optional[int] = None,
     ) -> None:
-        self._ensure_open()
         lock = self._lock_for(table, id_)
         async with lock:
-            old_doc = self._read_disk_nocache(table, id_)
+            old_doc = await self._read_disk_nocache(table, id_)
             to_write = (
                 doc
                 if replace
@@ -315,7 +396,11 @@ class Database:
             tdir = self.base / table
             tdir.mkdir(parents=True, exist_ok=True)
             if isinstance(to_write, dict):
-                to_write = {k: v for k, v in to_write.items() if k != "id"}
+                to_write = {
+                    k: v
+                    for k, v in to_write.items()
+                    if k != "id" and k != "doc_version"
+                }
             data = self._codec.dumps(to_write)
             path = self._resolve_doc_path(table, id_)
             tmp = path.with_suffix(path.suffix + ".tmp")
@@ -323,16 +408,22 @@ class Database:
             await asyncio.to_thread(tmp.replace, path)
 
             t = self._tbl(table)
-            t["doc_versions"][id_] = int(t["doc_versions"].get(id_, 0)) + 1
-            self._manifest["version"] = int(self._manifest.get("version", 0)) + 1
+            if incoming_version is not None:
+                t["doc_versions"][id_] = incoming_version
+            else:
+                t["doc_versions"][id_] = int(t["doc_versions"].get(id_, 0)) + 1
 
-            self._changed.setdefault(table, set()).add(id_)
-            self._deleted.get(table, set()).discard(id_)
+            changed = self._changed_dict().setdefault(table, set())
+            changed.add(id_)
+            deleted = self._deleted_dict().setdefault(table, set())
+            deleted.discard(id_)
 
             cached_doc = to_write
             if isinstance(cached_doc, dict):
                 cached_doc = dict(cached_doc)
                 cached_doc["id"] = id_
+                cached_doc["doc_version"] = t["doc_versions"][id_]
+
             self._cache.put((table, id_), cached_doc)
 
             self._update_indexes_for_doc_change(
@@ -347,7 +438,6 @@ class Database:
                 self._lists[table]["rows"][id_] = row
 
     async def _delete_local(self, table: str, id_: str) -> None:
-        self._ensure_open()
         lock = self._lock_for(table, id_)
         async with lock:
             path = self._resolve_doc_path(table, id_)
@@ -357,10 +447,11 @@ class Database:
             t = self._tbl(table)
             if id_ in t["doc_versions"]:
                 del t["doc_versions"][id_]
-            self._manifest["version"] = int(self._manifest.get("version", 0)) + 1
 
-            self._deleted.setdefault(table, set()).add(id_)
-            self._changed.get(table, set()).discard(id_)
+            deleted = self._deleted_dict().setdefault(table, set())
+            deleted.add(id_)
+            changed = self._changed_dict().setdefault(table, set())
+            changed.discard(id_)
 
             self._cache.delete((table, id_))
 
@@ -380,7 +471,6 @@ class Database:
             self._locks.pop((table, id_), None)
 
     async def build_index(self, table: str, fields: List[str]) -> None:
-        self._ensure_open()
         idxs = self._indexes.setdefault(table, {})
         for f in fields:
             idxs[f] = {}
@@ -415,7 +505,6 @@ class Database:
           - matched_only: return only matched fields (plus 'id'), values are subsets at dotted paths
           - return_fields: additional projected fields (supports dotted paths)
         """
-        self._ensure_open()
         where = where or {}
         clauses = any_of or [where]
 
@@ -434,23 +523,25 @@ class Database:
 
         for clause in clauses:
             idxs = self._indexes.get(table, {})
-            cand: Optional[Set[str]] = None
+            candidate_ids: Optional[Set[str]] = None
             for f, val in clause.items():
                 values = _vals(val)
                 if f in idxs:
-                    union = set()
+                    field_results = set()
                     for v in values:
-                        union |= idxs[f].get(v, set())
-                    cand = union if cand is None else (cand & union)
+                        field_results |= idxs[f].get(v, set())
+                    if candidate_ids is None:
+                        candidate_ids = field_results
+                    else:
+                        candidate_ids &= field_results
                 else:
-                    warnings.warn(
-                        f"Search on unindexed field '{f}' in table '{table}' may be slow",
-                        RuntimeWarning,
+                    logger.warning(
+                        f"Search on unindexed field '{f}' in table '{table}' may be slow"
                     )
-            if cand is None:
-                cand = set(await self.ids(table))
+            if candidate_ids is None:
+                candidate_ids = set(await self.ids(table))
             matched = set()
-            for id_ in cand:
+            for id_ in candidate_ids:
                 doc = await self.get(table, id_)
                 if not doc:
                     continue
@@ -510,7 +601,6 @@ class Database:
         return out
 
     async def define_list_view(self, table: str, fields: List[str]) -> None:
-        self._ensure_open()
         rows = {}
         for id_ in await self.ids(table):
             doc = await self.get(table, id_)
@@ -546,7 +636,6 @@ class Database:
           - Filtering happens on the *row projection* (first value at each path). For deep/list-aware matches use search().
           - If no list view was defined, falls back to rows = [{"id": ...}] so callers won't crash.
         """
-        self._ensure_open()
 
         lst = self._lists.get(table)
         if not lst or "rows" not in lst:
@@ -660,20 +749,22 @@ class Database:
         }
 
     async def sync_out(self) -> Optional[str]:
-        self._ensure_open()
-        changed_tables = set(self._changed.keys()) | set(self._deleted.keys())
-        if not changed_tables:
+        changed = self._changed_dict()
+        deleted = self._deleted_dict()
+        has_changes = any(len(s) > 0 for s in changed.values())
+        has_deletes = any(len(s) > 0 for s in deleted.values())
+        if not (has_changes or has_deletes):
             return None
+
+        changed_tables = set(changed.keys()) | set(deleted.keys())
 
         payload: Dict[str, Any] = {
             "format": 2,
-            "base_version": int(self._open_version_snapshot),
-            "new_version": int(self._manifest.get("version", 0)),
             "tables": {},
         }
         for table in changed_tables:
-            changed_ids = set(self._changed.get(table, set()))
-            deleted_ids = set(self._deleted.get(table, set()))
+            changed_ids = changed.get(table, set())
+            deleted_ids = deleted.get(table, set())
             docs: Dict[str, Any] = {}
             for id_ in changed_ids:
                 doc = await self.get(table, id_)
@@ -687,31 +778,16 @@ class Database:
                     for id_ in (changed_ids | deleted_ids)
                 },
             }
-
         raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         b64 = base64.b64encode(zlib.compress(raw)).decode("ascii")
-        return "SYNC " + b64
+        return "DBSYNC LAZY " + b64
 
     async def sync_in(
         self,
         data_b64: str,
-        *,
-        require_not_behind: bool = True,
-        require_pristine: bool = True,
     ) -> Dict[str, Any]:
-        self._ensure_open()
-        if data_b64.startswith("SYNC "):
+        if data_b64.startswith("DBSYNC LAZY "):
             data_b64 = data_b64[5:]
-        if require_pristine:
-            if self._manifest.get("version", 0) != self._open_version_snapshot:
-                raise RuntimeError(
-                    f"Local DB modified since context opened (current={self._manifest.get('version',0)}, "
-                    f"snapshot={self._open_version_snapshot})"
-                )
-            if any(self._changed.values()) or any(self._deleted.values()):
-                raise RuntimeError(
-                    "Local context has unapplied changes; cannot sync_in on dirty context."
-                )
 
         if not isinstance(data_b64, str):
             raise TypeError("sync_in expects a base64 string (without 'SYNC ' prefix)")
@@ -733,54 +809,39 @@ class Database:
         if int(payload.get("format", 0)) != 2:
             raise ValueError("Unsupported sync payload format")
 
-        base_ver = int(payload.get("base_version", 0))
-        if require_not_behind and int(self._manifest.get("version", 0)) < base_ver:
-            raise RuntimeError(
-                f"Local manifest version {self._manifest.get('version', 0)} "
-                f"is behind payload base_version {base_ver}"
-            )
+        applied_upserts = 0
+        applied_deletes = 0
+        conflicts: List[Tuple[str, str, str]] = []
 
-        self._suppress_replication = True
-        try:
-            applied_upserts = 0
-            applied_deletes = 0
-            conflicts: List[Tuple[str, str, str]] = []
+        for table, entry in payload.get("tables", {}).items():
+            for id_ in entry.get("deleted_ids", []):
+                try:
+                    await self._delete_local(table, id_)
+                    applied_deletes += 1
+                except Exception as e:
+                    conflicts.append((table, id_, f"delete: {e!s}"))
 
-            for table, entry in payload.get("tables", {}).items():
-                for id_ in entry.get("deleted_ids", []):
-                    try:
-                        await self._delete_local(table, id_)
-                        applied_deletes += 1
-                    except Exception as e:
-                        conflicts.append((table, id_, f"delete: {e!s}"))
+            for id_, doc in entry.get("docs", {}).items():
+                incoming_version = entry.get("doc_versions", {}).get(id_)
+                try:
+                    await self._upsert_local(
+                        table,
+                        id_,
+                        doc,
+                        replace=True,
+                        # incoming_version=incoming_version, # set to sync_in provided ver
+                    )
+                    applied_upserts += 1
+                except Exception as e:
+                    conflicts.append((table, id_, f"upsert: {e!s}"))
 
-            for table, entry in payload.get("tables", {}).items():
-                docs = entry.get("docs", {}) or {}
-                for id_, doc in docs.items():
-                    try:
-                        await self._upsert_local(table, id_, doc, replace=True)
-                        applied_upserts += 1
-                    except Exception as e:
-                        conflicts.append((table, id_, f"upsert: {e!s}"))
+        _reset_context_vars()
 
-            new_ver = max(
-                int(self._manifest.get("version", 0)),
-                int(payload.get("new_version", 0)),
-            )
-            self._manifest["version"] = new_ver
-
-            self._changed = {}
-            self._deleted = {}
-            self._open_version_snapshot = self._manifest.get("version", 0)
-
-            return {
-                "applied_upserts": applied_upserts,
-                "applied_deletes": applied_deletes,
-                "conflicts": conflicts,
-                "new_version": new_ver,
-            }
-        finally:
-            self._suppress_replication = False
+        return {
+            "applied_upserts": applied_upserts,
+            "applied_deletes": applied_deletes,
+            "conflicts": conflicts,
+        }
 
     async def snapshot_docs(
         self, table: str, ids: List[str]
@@ -803,17 +864,10 @@ class Database:
                 await self._upsert_local(table, id_, d, replace=True)
 
     async def make_sync_from_docs(
-        self,
-        tables_docs: Dict[str, Dict[str, Optional[JSON]]],
-        *,
-        base_version: Optional[int] = None,
+        self, tables_docs: Dict[str, Dict[str, Optional[JSON]]]
     ) -> str:
         payload = {
             "format": 2,
-            "base_version": int(
-                self._open_version_snapshot if base_version is None else base_version
-            ),
-            "new_version": int(self._manifest.get("version", 0)),
             "tables": {},
         }
         for table, idmap in tables_docs.items():
@@ -836,92 +890,49 @@ class Database:
             }
         raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         b64 = base64.b64encode(zlib.compress(raw)).decode("ascii")
-        return "SYNC " + b64
+        return "DBSYNC LAZY " + b64
 
-    @asynccontextmanager
-    async def _cluster_lock(self, ids: List[str]):
-        if not self._cluster:
-            yield None
-            return
-        ids = sorted(set(ids))
-        lock_id = await self._cluster.acquire_lock(ids)
-        try:
-            yield lock_id
-        except asyncio.CancelledError:
-            try:
-                await asyncio.shield(self._cluster.release(lock_id, ids))
-            finally:
-                raise
-        except BaseException:
-            await asyncio.shield(self._cluster.release(lock_id, ids))
-            raise
-        else:
-            await asyncio.shield(self._cluster.release(lock_id, ids))
-
-    async def _replicate_ops(
-        self, table: str, ops: List[Tuple[str, str, Optional[JSON], bool]]
+    async def _do_ops(
+        self,
+        table: str,
+        kind: Literal["delete", "upsert", "patch"],
+        id_: str,
+        doc: Optional[JSON],
+        replace: bool,
+        incoming_version: Optional[int],
     ) -> None:
-        if not self._cluster:
-            for kind, id_, payload, replace in ops:
-                if kind == "delete":
-                    await self._delete_local(table, id_)
-                elif kind == "patch":
-                    await self._upsert_local(table, id_, payload, replace=False)
-                else:
-                    await self._upsert_local(table, id_, payload, replace=replace)
-            return
+        if kind not in ["delete", "upsert", "patch"]:
+            raise ValueError(f"Unknown op {kind}")
 
-        ids = [id_ for _, id_, _, _ in ops]
-        async with self._cluster_lock(ids):
-            preimage = {table: await self.snapshot_docs(table, ids)}
+        try:
+            locks = _locks_ctx.get()
+            if not id_ in locks:
+                locks[id_] = await self.cluster.acquire_lock([id_])
+                _locks_ctx.set(locks)
+        except Exception as e:
+            logger.critical(e)
+            raise Exception(f"Could not acquire cluster lock for id {id_}")
 
-            for kind, id_, payload, replace in ops:
-                if kind == "delete":
-                    await self._delete_local(table, id_)
-                elif kind == "patch":
-                    await self._upsert_local(table, id_, payload, replace=False)
-                elif kind == "upsert":
-                    await self._upsert_local(table, id_, payload, replace=replace)
-                else:
-                    raise ValueError(f"unknown op {kind}")
+        snapshots = _snapshots_ctx.get()
+        if table not in snapshots:
+            snapshots[table] = await self.snapshot_docs(table, ensure_list(id_))
+            _snapshots_ctx.set(snapshots)
 
-            sync_str = await self.sync_out()
-            if sync_str is None:
-                return
-            _, b64 = sync_str.split(" ", 1)
-
-            ok_peers = []
-            failed = False
-            async with self._cluster.receiving:
-                for peer in self._cluster.peers.get_established():
-                    sent = await self._cluster.send_command(f"SYNC {b64}", peer)
-                    result, _ = await self._cluster.await_receivers(
-                        sent, raise_err=False
-                    )
-                    if result:
-                        ok_peers.append(peer)
-                    else:
-                        failed = True
-
-            if not failed:
-                return
-
-            async def do_rollback():
-                self._suppress_replication = True
-                try:
-                    await self.apply_snapshot(table, preimage[table])
-                    comp_sync = await self.make_sync_from_docs(preimage)
-                    _, comp_b64 = comp_sync.split(" ", 1)
-                    async with self._cluster.receiving:
-                        for peer in ok_peers:
-                            sent = await self._cluster.send_command(
-                                f"SYNC {comp_b64}", peer
-                            )
-                            await self._cluster.await_receivers(sent, raise_err=False)
-                finally:
-                    self._suppress_replication = False
-
-            await asyncio.shield(do_rollback())
-            raise RuntimeError(
-                "Replication failed on at least one peer; rolled back everywhere."
+        if kind == "delete":
+            await self._delete_local(table, id_)
+        elif kind == "patch":
+            await self._upsert_local(
+                table,
+                id_,
+                doc,
+                replace=False,
+                incoming_version=incoming_version,
+            )
+        elif kind == "upsert":
+            await self._upsert_local(
+                table,
+                id_,
+                doc,
+                replace=replace,
+                incoming_version=incoming_version,
             )

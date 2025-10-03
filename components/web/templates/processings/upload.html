@@ -5,9 +5,8 @@
 {% block breadcrumb %}
 <nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
   <ul>
-    <li><span>Objects</span></li>
-    <li><a href="#" hx-target="#body-main" hx-get="/objects/cars">Cars</a></li>
-    <li><span>Automatische Erfassung</span></li>
+    <li><span>{{ L["Objects"] }}</span></li>
+    <li><a href="#" hx-target="#body-main" hx-get="{{ request.path }}">{{ L["AI recognition"] }}</a></li>
   </ul>
 </nav>
 {% endblock breadcrumb %}

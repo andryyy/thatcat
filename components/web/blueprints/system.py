@@ -1,14 +1,13 @@
 import asyncio
-import components.system
 import fileinput
 import json
 import os
 
+from ..utils import *
+from components.models.system import SystemSettings, SystemSettingsPatch, form
+from components.utils import batch, datetime
+from components.logs import logger
 from config import defaults
-from components.models.system import SystemSettings, UpdateSystemSettings
-from components.utils import batch, expire_key
-from components.utils.datetimes import datetime, ntime_utc_now
-from components.web.utils import *
 
 blueprint = Blueprint("system", __name__, url_prefix="/system")
 
@@ -17,17 +16,10 @@ APP_LOGS_FULL_PULL = dict()
 APP_LOGS_LAST_REFRESH = None
 
 
-@blueprint.before_request
-async def before_request():
-    global L
-    L = LANG[request.USER_LANG]
-
-
 @blueprint.context_processor
 def load_context():
     return {
-        "schemas": {"system_settings": SystemSettings.model_json_schema()},
-        "L": L,
+        "schemas": {"system_settings": form},
     }
     return context
 
@@ -35,10 +27,7 @@ def load_context():
 @blueprint.route("/status/refresh", methods=["POST"])
 @acl("system")
 async def status_refresh():
-    async with cluster.receiving:
-        sent = await cluster.send_command("STATUS", "*")
-        await cluster.await_receivers(sent, raise_err=False)
-
+    await cluster.send_command("STATUS", "*")
     return await status()
 
 
@@ -55,21 +44,18 @@ async def status():
 @blueprint.route("/settings", methods=["PATCH"])
 @acl("system")
 async def write_settings():
-    try:
-        UpdateSystemSettingsModel = UpdateSystemSettings.parse_obj(request.form_parsed)
-    except ValidationError as e:
-        return validation_error(e.errors())
-
-    async with ClusterLock("system_settings"):
-        async with TinyDB(**dbparams()) as db:
-            db.table("system_settings").upsert(
-                Document(UpdateSystemSettingsModel.dict(), doc_id=1)
-            )
+    async with db:
+        system_settings = await db.get("system_settings", "1")
+        system_settings = SystemSettings(**system_settings)
+        patch_data = SystemSettingsPatch(**request.form_parsed)
+        system_settings = replace(system_settings, **patch_data.dump_patched())
+        system_settings_dict = asdict(system_settings)
+        await db.patch("system_settings", "1", system_settings_dict)
 
     return trigger_notification(
         level="success",
         response_code=204,
-        title="Settings updated",
+        title="Settings saved",
         message="System settings were updated",
     )
 
@@ -77,43 +63,37 @@ async def write_settings():
 @blueprint.route("/settings")
 @acl("system")
 async def settings():
-    try:
-        settings = await components.system.get_system_settings()
-    except ValidationError as e:
-        return validation_error(e.errors())
+    async with db:
+        system_settings = await db.get("system_settings", "1")
 
-    return await render_template("system/settings.html", settings=settings.dict())
+    return await render_template(
+        "system/settings.html", settings=SystemSettings(**system_settings)
+    )
 
 
 @blueprint.route("/logs")
 @blueprint.route("/logs/search", methods=["POST"])
 @acl("system")
 async def cluster_logs():
-    try:
-        (
-            q,
-            page,
-            page_size,
-            sort_attr,
-            sort_reverse,
-            filters,
-        ) = table_search_helper(
+    if request.method == "POST":
+
+        def _log_file_generator():
+            yield "logs/application.log"
+            for peer in cluster.peers.remotes:
+                if os.path.isfile(f"logs/application.{peer}.log"):
+                    yield f"logs/application.{peer}.log"
+
+        q, page, page_size, sort_attr, sort_reverse, filters = table_search_helper(
             request.form_parsed,
             "system_logs",
             default_sort_attr="record.time.repr",
             default_sort_reverse=True,
         )
-    except ValidationError as e:
-        return validation_error(e.errors())
-
-    if request.method == "POST":
         _logs = []
         async with LOG_LOCK:
             parser_failed = False
-
-            with fileinput.input(
-                components.system.list_application_log_files(), encoding="utf-8"
-            ) as f:
+            log_files = list(_log_file_generator())
+            with fileinput.input(log_files, encoding="utf-8") as f:
                 for line in f:
                     if q in line:
                         try:
@@ -124,13 +104,14 @@ async def cluster_logs():
                             f.nextfile()
 
             if parser_failed:
-                return trigger_notification(
-                    level="user",
-                    response_code=204,
-                    title="Full refresh",
-                    message="Logs rotated, requesting full refresh...",
-                    additional_triggers={"forceRefresh": ""},
-                    duration=1000,
+                return (
+                    "",
+                    204,
+                    {
+                        "HX-Trigger": json.dumps(
+                            {"refreshLogs": {"target": "#system-logs-refresh"}}
+                        ),
+                    },
                 )
 
         def system_logs_sort_func(sort_attr):
@@ -174,8 +155,8 @@ async def cluster_logs():
                 "logs": system_logs,
                 "page_size": page_size,
                 "page": page,
-                "pages": len(log_pages),
-                "elements": len(_logs),
+                "total_pages": len(log_pages),
+                "total": len(_logs),
             },
         )
     else:
@@ -185,78 +166,47 @@ async def cluster_logs():
 @blueprint.route("/logs/refresh")
 @acl("system")
 async def refresh_cluster_logs():
-    await ws_htmx(
-        session["login"],
-        "beforeend",
-        '<div class="loading-logs" hidden _="on load trigger '
-        + "notification("
-        + "title: 'Please wait', level: 'user', "
-        + "message: 'Requesting logs, your view will be updated automatically.', duration: 10000)\">"
-        + "</div>",
-        "/system/logs",
-    )
+    async with LOG_LOCK:
+        for peer in cluster.peers.get_established():
+            startb = -1
+            file_path = f"logs/application.{peer}.log"
+            if os.path.exists(file_path) and os.path.getsize(file_path) > (
+                5 * 1024 * 1024
+            ):
+                startb = 0
 
-    if (
-        not APP_LOGS_LAST_REFRESH
-        or request.args.get("force")
-        or (
-            round(ntime_utc_now() - APP_LOGS_LAST_REFRESH)
-            >= defaults.CLUSTER_LOGS_REFRESH_AFTER
-        )
-    ):
-        APP_LOGS_LAST_REFRESH = ntime_utc_now()
-
-        async with LOG_LOCK:
-            async with ClusterLock("files"):
-                for peer in cluster.peers.get_established():
-                    if not peer in APP_LOGS_FULL_PULL:
-                        APP_LOGS_FULL_PULL[peer] = True
-                        current_app.add_background_task(
-                            expire_key,
-                            APP_LOGS_FULL_PULL,
-                            peer,
-                            36000,
-                        )
-                        startb = 0
-                    else:
-                        startb = -1
-                        file_path = f"peer_files/{peer}/logs/application.log"
-                        if os.path.exists(file_path) and os.path.getsize(file_path) > (
-                            5 * 1024 * 1024
-                        ):
-                            startb = 0
-
-                    await cluster.files.fileget(
-                        "logs/application.log",
-                        f"peer_files/{peer}/logs/application.log",
-                        peer,
-                        startb,
-                        -1,
+            try:
+                await cluster.files.fileget(
+                    "logs/application.log",
+                    f"logs/application.{peer}.log",
+                    peer,
+                    startb,
+                    -1,
+                )
+            except Exception as e:
+                if str(e).endswith("START_BEHIND_FILE_END"):
+                    a = await cluster.files.fileget(
+                        "logs/application.log", f"logs/application.{peer}.log", peer
                     )
 
-            missing_peers = ", ".join(cluster.peers.get_offline_peers())
+        if cluster.peers.get_offline_peers():
+            await ws_htmx(
+                session["login"],
+                "beforeend",
+                '<div hidden _="on load trigger '
+                + "notification("
+                + "title: 'Offline peers', level: 'warning', "
+                + "message: 'One or more peers seem to be offline and were not pulled', duration: 3000)\">"
+                + "</div>",
+                "/system/logs",
+            )
 
-            if missing_peers:
-                await ws_htmx(
-                    session["login"],
-                    "beforeend",
-                    '<div hidden _="on load trigger '
-                    + "notification("
-                    + "title: 'Missing peers', level: 'warning', "
-                    + f"message: 'Some peers seem to be offline and were not pulled: {missing_peers}', duration: 3000)\">"
-                    + "</div>",
-                    "/system/logs",
-                )
-
-    refresh_ago = round(ntime_utc_now() - APP_LOGS_LAST_REFRESH)
-
-    await ws_htmx(
-        session["login"],
-        "beforeend",
-        '<div hidden _="on load trigger logsReady on #system-logs-table-search '
-        + f"then put {refresh_ago} into #system-logs-last-refresh "
-        + f'then wait 500 ms then trigger removeNotification on .notification-user"></div>',
-        "/system/logs",
+    return (
+        "",
+        204,
+        {
+            "HX-Trigger": json.dumps(
+                {"logsReady": {"target": "#system-logs-table-search"}}
+            ),
+        },
     )
-
-    return "", 204

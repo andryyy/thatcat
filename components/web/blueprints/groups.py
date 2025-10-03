@@ -1,57 +1,47 @@
-import components.users
-from components.models.users import UserGroups, UserProfile
-from components.web.utils import *
+from ..utils import *
+from components.models.users import UserGroups
 
 
 blueprint = Blueprint("groups", __name__, url_prefix="/groups")
 
 
-@blueprint.before_request
-async def before_request():
-    global L
-    L = LANG[request.USER_LANG]
-
-
-@blueprint.context_processor
-def load_context():
-    return {
-        "user_profile": UserProfile.model_json_schema(),
-        "L": L,
-    }
-
-
 @blueprint.route("/", methods=["PATCH"])
 @acl("system")
 async def user_group():
-    request_data = UserGroups.parse_obj(request.form_parsed)
+    user_groups = UserGroups(**request.form_parsed)
 
-    assigned_to, _ = await components.users.search(
-        name="", filters={"groups": request_data.name}
-    )
-    assign_to = []
+    new_assignments: list[dict] = []
+    for user_id in user_groups.members:
+        new_assignments.append(await db.get("users", user_id))
 
-    for user_id in request_data.members:
-        assign_to.append(await components.users.get(user_id=user_id))
+    async with db:
+        current_assignments = await db.search(
+            "users", where={"groups": user_groups.name}
+        )
 
-    _all = assigned_to + assign_to
+        all_assignments = current_assignments
+        for assignment in new_assignments:
+            if assignment not in all_assignments:
+                all_assignments.append(assignment)
 
-    async with ClusterLock("users"):
-        for user in _all:
-            if request_data.name in user.groups:
-                user.groups.remove(request_data.name)
+        for user_dict in all_assignments:
+            if user_groups.name in user_dict["groups"]:
+                user_dict["groups"].remove(user_groups.name)
 
-            if request_data.new_name not in user.groups and user in assign_to:
-                user.groups.append(request_data.new_name)
+            if (
+                user_groups.new_name not in user_dict["groups"]
+                and user_dict in new_assignments
+            ):
+                user_dict["groups"].append(user_groups.new_name)
 
-            await components.users.patch(
-                user_id=user.id, data=user.model_dump(mode="json")
-            )
+            await db.patch("users", user_dict["id"], {"groups": user_dict["groups"]})
 
     return "", 204
 
 
 @blueprint.route("/")
 @acl("system")
-@formoptions(["users"])
 async def get_groups():
-    return await render_template("groups/groups.html")
+    async with db:
+        users = await db.search("users")
+    return await render_template("groups/groups.html", users=users)

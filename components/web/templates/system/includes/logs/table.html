@@ -3,13 +3,12 @@
 {% set delete_button = True if not delete_button == False %}
 {% set toggle_all_button = True if not toggle_all_button == False %}
 
-<form id="system-logs-form" hx-trigger="{% if request.headers.get("Hx-Request") %}load once, {% endif %}submit, htmx:wsOpen from:body once" hx-get="/system/logs/refresh"></form>
 
 <form id="system-logs-table-search"
   hx-trigger="logsReady, keyup changed from:input[name=q] delay:100ms, submit throttle:100ms"
   hx-post="/system/logs/search"
   hx-target="#system-logs-table-body">
-  <fieldset role="group">
+  <fieldset>
     <input type="text" name="q"
       hx-on:keydown="event.keyCode==13?event.preventDefault():null"
       placeholder="Type to search"
@@ -17,15 +16,17 @@
       autocorrect="off"
       autocapitalize="off"
       spellcheck="false" />
-    <input form="system-logs-form" hx-trigger="click throttle:100ms, forceRefresh from:body" hx-get="/system/logs/refresh?force=1" data-loading-disable type="submit" value="↺" />
   </fieldset>
+  <small>
+    <a href="#" id="system-logs-refresh" class="color-blue no-text-decoration"
+    hx-get="/system/logs/refresh"
+    hx-trigger="load once, click throttle:100ms, refreshLogs"
+    data-loading-disable>
+      ↺ {{ L["Refresh Logs"] }}
+    </a>
+  </small>
 </form>
-
 <div class="overflow-auto">
-  <p>
-    Last remote update: <b id="system-logs-last-refresh">?</b> seconds ago<br>
-    <small>Logs will be updated after {{ CLUSTER_LOGS_REFRESH_AFTER }} seconds if not enforced.</small>
-  </p>
   <table id="system-logs-table">
     <tbody id="system-logs-table-body"></tbody>
   </table>
