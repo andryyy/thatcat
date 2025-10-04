@@ -77,7 +77,7 @@
       <section>
         <h6>{{ L["Profile"] }}</h6>
         {% with
-          schema=schemas.user_profile,
+          schema=forms.users.profile,
           current_data=user.profile,
           root_key="profile"
         %}

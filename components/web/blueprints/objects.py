@@ -1,4 +1,3 @@
-from components.models.objects import Location, model_meta, forms
 from components.utils import ensure_list, unique_list
 from ..utils import *
 
@@ -11,7 +10,7 @@ async def before_request():
     request._objects = dict()
 
     if "object_type" in request.view_args:
-        if request.view_args["object_type"] not in model_meta["types"]:
+        if request.view_args["object_type"] not in model_meta["objects"]["types"]:
             if "Hx-Request" in request.headers:
                 return trigger_notification(
                     level="error",
@@ -30,7 +29,7 @@ async def before_request():
             for id_ in object_ids:
                 match = await db.get(object_type, id_)
                 if match:
-                    model = model_meta["base"][object_type]
+                    model = model_meta["objects"]["base"][object_type]
                     match = model(**match)
                 if not match or (
                     session["id"] not in match.assigned_users
@@ -46,7 +45,7 @@ async def before_request():
                     abort(404)
 
                 if not "system" in session["acl"]:
-                    for f in model_meta["system_fields"][object_type]:
+                    for f in model_meta["objects"]["system_fields"][object_type]:
                         if hasattr(match, f):
                             setattr(match, f, None)
 
@@ -61,8 +60,7 @@ async def before_request():
 @blueprint.context_processor
 async def load_context():
     return {
-        "schemas": forms,
-        "object_types": model_meta["types"],
+        "object_types": model_meta["objects"]["types"],
     }
 
 
@@ -89,7 +87,6 @@ async def get_objects(object_type: str):
         q, page, page_size, sort_attr, sort_reverse, filters = table_search_helper(
             request.form_parsed, object_type, default_sort_attr="name"
         )
-
         async with db:
             rows = await db.list_rows(
                 object_type,
@@ -102,7 +99,6 @@ async def get_objects(object_type: str):
                 where={"assigned_users": session["id"]}
                 if not "system" in session["acl"]
                 else None,
-                prefer_indexed=True,
             )
 
         return await render_or_json(
@@ -121,7 +117,7 @@ async def create_object(object_type: str):
 
     request.form_parsed["assigned_users"] = session["id"]
 
-    upsert_model = model_meta["add"][object_type]
+    upsert_model = model_meta["objects"]["add"][object_type]
     upsert_data = upsert_model(**request.form_parsed)
 
     async with db:
@@ -129,7 +125,7 @@ async def create_object(object_type: str):
             object_type,
             {
                 f: getattr(upsert_data, f)
-                for f in model_meta["unique_fields"][object_type]
+                for f in model_meta["objects"]["unique_fields"][object_type]
             },
         )
         if _unique_hits:
@@ -188,12 +184,12 @@ async def delete_object(object_type: str, object_id: str | None = None):
 async def patch_object(object_type: str, object_id: str | None = None):
     object_ids = request._objects.keys()
 
-    patch_model = model_meta["patch"][object_type]
-    base_model = model_meta["base"][object_type]
+    patch_model = model_meta["objects"]["patch"][object_type]
+    base_model = model_meta["objects"]["base"][object_type]
     patch_data = patch_model(**request.form_parsed)
 
     if not "system" in session["acl"]:
-        for f in model_meta["system_fields"][object_type]:
+        for f in model_meta["objects"]["system_fields"][object_type]:
             if hasattr(patch_data, f):
                 setattr(patch_data, f, None)
 
@@ -204,12 +200,12 @@ async def patch_object(object_type: str, object_id: str | None = None):
             # Check for uniqueness
             unique_filters = {
                 f: getattr(patched_object, f)
-                for f in model_meta["unique_fields"][object_type]
+                for f in model_meta["objects"]["unique_fields"][object_type]
             }
             _unique_hits = await db.search(object_type, unique_filters)
             if _unique_hits and _unique_hits[0]["id"] != id_:
                 raise ValueError(
-                    model_meta["unique_fields"][object_type], "Object exists"
+                    model_meta["objects"]["unique_fields"][object_type], "Object exists"
                 )
 
             # Check for project access

@@ -2,7 +2,6 @@ import asyncio
 import json
 import os
 from components.processings import process_image
-from components.models.processings import Processing
 from ..utils import *
 
 blueprint = Blueprint("processings", __name__, url_prefix="/processings")
@@ -30,7 +29,6 @@ async def get_incomplete():
             where={"assigned_user": session["id"]}
             if not "system" in session["acl"]
             else None,
-            prefer_indexed=True,
         )
 
         rows["items"] = [

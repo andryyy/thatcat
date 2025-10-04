@@ -1,5 +1,4 @@
 from ..utils import *
-from components.models.users import UserGroups
 
 
 blueprint = Blueprint("groups", __name__, url_prefix="/groups")

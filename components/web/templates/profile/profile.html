@@ -29,7 +29,7 @@
       hx-trigger="submit throttle:1s"
       hx-patch="/profile/edit?doc_version={{ user.doc_version }}">
       {% with
-        schema=schemas.user_profile,
+        schema=forms.users.profile,
         current_data=user.profile
       %}
         {% include "includes/form_builder.html" %}

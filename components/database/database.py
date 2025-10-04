@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import asyncio, json, zlib, base64, contextvars
+from .mappings import mappings, _default_list_row
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Set, Tuple
 from collections import OrderedDict
 from contextlib import asynccontextmanager
 from components.logs import logger
 from components.utils import ensure_list
+from components.models import model_meta
+from components.cluster.exceptions import ClusterException
+from functools import wraps
 
 
 try:
@@ -105,6 +109,18 @@ def _deep_merge(dst: Any, src: Any) -> Any:
     return src
 
 
+def _requires_cluster(func):
+    @wraps(func)
+    async def wrapper(self, *args, **kwargs):
+        if not self._cluster_ready.is_set():
+            raise ClusterException("Cluster not set")
+        elif not self.cluster.peers.local.leader:
+            raise ClusterException("Cluster not ready")
+        return await func(self, *args, **kwargs)
+
+    return wrapper
+
+
 class _LRU:
     def __init__(self, max_entries: int = 2048):
         self.max = max_entries
@@ -136,11 +152,12 @@ class Database:
         self.base = Path(base)
         self.base.mkdir(parents=True, exist_ok=True)
         self.main_path = self.base / main_file
+        self.cluster = None
+        self._cluster_ready = asyncio.Event()
         self._open = False
         self._manifest: JSON = {}
         self._peer_manifests: Dict[str, JSON] = {}
         self._indexes: Dict[str, Dict[str, Dict[Any, Set[str]]]] = {}
-        self._lists: Dict[str, Dict[str, Any]] = {}
         self._cache = _LRU(max_entries=2048)
         self._locks: Dict[Tuple[str, str], asyncio.Lock] = {}
         self._codec = StorageCodec(codec)
@@ -153,6 +170,16 @@ class Database:
             _changed_ctx.set({})
         if not _deleted_ctx.get():
             _deleted_ctx.set({})
+
+    @property
+    def cluster(self):
+        return self._cluster
+
+    @cluster.setter
+    def cluster(self, value):
+        self._cluster = value
+        if value is not None:
+            self._cluster_ready.set()
 
     def _validate_id(self, id_: str):
         if not id_:
@@ -430,13 +457,6 @@ class Database:
                 table, id_=id_, old_doc=old_doc, new_doc=cached_doc
             )
 
-            if table in self._lists:
-                fields = self._lists[table]["fields"]
-                row = {"id": id_}
-                for f in fields:
-                    row[f] = id_ if f == "id" else _get_first(cached_doc, f, None)
-                self._lists[table]["rows"][id_] = row
-
     async def _delete_local(self, table: str, id_: str) -> None:
         lock = self._lock_for(table, id_)
         async with lock:
@@ -465,9 +485,6 @@ class Database:
                     for v in empties:
                         mapping.pop(v, None)
 
-            if table in self._lists:
-                self._lists[table]["rows"].pop(id_, None)
-
             self._locks.pop((table, id_), None)
 
     async def build_index(self, table: str, fields: List[str]) -> None:
@@ -490,127 +507,53 @@ class Database:
         self,
         table: str,
         where: Optional[Dict[str, Any]] = None,
-        *,
-        any_of: Optional[List[Dict[str, Any]]] = None,
-        matched_only: bool = False,
-        return_fields: Optional[List[str]] = None,
         limit: Optional[int] = None,
     ) -> List[JSON]:
-        """
-        Indexed search with logical AND/OR and optional projection.
-
-        Semantics:
-          - where: AND across fields; within-field you can pass a list for OR (e.g., {"status": ["open","pending"]})
-          - any_of: OR across clauses (each clause uses the same semantics as 'where')
-          - matched_only: return only matched fields (plus 'id'), values are subsets at dotted paths
-          - return_fields: additional projected fields (supports dotted paths)
-        """
         where = where or {}
-        clauses = any_of or [where]
-
-        def _vals(x):
-            if isinstance(x, (list, tuple, set)):
-                return list(x)
-            return [x]
-
-        def _project_value(doc: JSON, path: str):
-            vals = _get_all(doc, path)
-            if len(vals) == 1:
-                return vals[0]
-            return vals
-
         results: Set[str] = set()
-
-        for clause in clauses:
-            idxs = self._indexes.get(table, {})
-            candidate_ids: Optional[Set[str]] = None
-            for f, val in clause.items():
-                values = _vals(val)
-                if f in idxs:
-                    field_results = set()
-                    for v in values:
-                        field_results |= idxs[f].get(v, set())
-                    if candidate_ids is None:
-                        candidate_ids = field_results
-                    else:
-                        candidate_ids &= field_results
-                else:
-                    logger.warning(
-                        f"Search on unindexed field '{f}' in table '{table}' may be slow"
-                    )
-            if candidate_ids is None:
-                candidate_ids = set(await self.ids(table))
-            matched = set()
-            for id_ in candidate_ids:
-                doc = await self.get(table, id_)
-                if not doc:
-                    continue
-                ok = True
-                for f, val in clause.items():
-                    values = _vals(val)
-                    dvals = _get_all(doc, f)
-                    if not any(v in dvals for v in values):
-                        ok = False
-                        break
-                if ok:
-                    matched.add(id_)
-            results |= matched
-            if limit is not None and len(results) >= limit:
-                break
-
+        idxs = self._indexes.get(table, {})
+        candidate_ids: Optional[Set[str]] = None
         out: List[JSON] = []
+
+        for f, val in where.items():
+            values = ensure_list(val)
+            if f in idxs:
+                field_results = set()
+                for v in values:
+                    field_results |= idxs[f].get(v, set())
+                if candidate_ids is None:
+                    candidate_ids = field_results
+                else:
+                    candidate_ids &= field_results
+            else:
+                logger.warning(
+                    f"Search on unindexed field '{f}' in table '{table}' may be slow"
+                )
+        if candidate_ids is None:
+            candidate_ids = set(await self.ids(table))
+
+        for id_ in candidate_ids:
+            doc = await self.get(table, id_)
+            if not doc:
+                continue
+            ok = True
+            for f, val in where.items():
+                values = ensure_list(val)
+                dvals = _get_all(doc, f)
+                if not any(v in dvals for v in values):
+                    ok = False
+                    break
+            if ok:
+                results.add(id_)
+
         ordered = sorted(results)
         if limit is not None:
             ordered = ordered[:limit]
         for id_ in ordered:
             doc = await self.get(table, id_)
-            if not doc:
-                continue
-
-            if matched_only:
-                slim: Dict[str, Any] = {"id": id_}
-                fieldset: Set[str] = set()
-                for c in clauses:
-                    fieldset.update(c.keys())
-                for f in fieldset:
-                    wanted = set()
-                    for c in clauses:
-                        if f in c:
-                            wanted |= set(_vals(c[f]))
-                    subset = [v for v in _get_all(doc, f) if v in wanted]
-                    if subset:
-                        slim[f] = subset if len(subset) > 1 else subset[0]
-                if return_fields:
-                    for f in return_fields:
-                        if f == "id":
-                            slim["id"] = id_
-                        else:
-                            slim[f] = _project_value(doc, f)
-                out.append(slim)
-            else:
-                if return_fields:
-                    proj: Dict[str, Any] = {"id": id_}
-                    for f in return_fields:
-                        if f == "id":
-                            proj["id"] = id_
-                        else:
-                            proj[f] = _project_value(doc, f)
-                    out.append(proj)
-                else:
-                    out.append(doc)
+            if doc:
+                out.append(doc)
         return out
-
-    async def define_list_view(self, table: str, fields: List[str]) -> None:
-        rows = {}
-        for id_ in await self.ids(table):
-            doc = await self.get(table, id_)
-            if not doc:
-                continue
-            row = {"id": id_}
-            for f in fields:
-                row[f] = _get_first(doc, f, None)
-            rows[id_] = row
-        self._lists[table] = {"fields": list(fields), "rows": rows}
 
     async def list_rows(
         self,
@@ -623,45 +566,41 @@ class Database:
         where: dict | None = None,
         any_of: list[dict] | None = None,
         q: str | None = None,
-        prefer_indexed: bool = False,
     ):
         """
         Filtering:
           - where: AND across fields; within a field pass a list for OR (e.g., {"status": ["open","pending"]})
           - any_of: OR across clauses, each clause has same semantics as 'where'
           - q: case-insensitive substring applied to stringified row values
-          - prefer_indexed: if True, use search() to prefilter IDs via indexes, then render rows
 
         Notes:
-          - Filtering happens on the *row projection* (first value at each path). For deep/list-aware matches use search().
-          - If no list view was defined, falls back to rows = [{"id": ...}] so callers won't crash.
+          - Filtering happens on the *row projection* (first value at each path).
         """
 
-        lst = self._lists.get(table)
-        if not lst or "rows" not in lst:
-            ids = await self.ids(table)
-            rows = [{"id": i} for i in ids]
-        else:
-            rows = list(lst["rows"].values())
-
-        if prefer_indexed and (where or any_of):
-            hits = await self.search(
-                table, where=where, any_of=any_of, return_fields=["id"]
+        ids = await self.ids(table)
+        rows = []
+        for id_ in ids:
+            doc = await self.get(table, id_)
+            if not doc:
+                continue
+            rows.append(
+                {
+                    k: v
+                    for k, v in doc.items()
+                    if k in mappings.LIST_ROW_FIELDS.get(table, _default_list_row)
+                }
             )
-            allow_ids = {h["id"] for h in hits}
-            rows = [r for r in rows if r.get("id") in allow_ids]
-
-        def _vals(x):
-            if isinstance(x, (list, tuple, set)):
-                return list(x)
-            return [x]
 
         def _match_clause(row: dict, clause: dict) -> bool:
             for k, v in (clause or {}).items():
                 rv = row.get(k, None)
-                options = _vals(v)
-                if not any(rv == opt for opt in options):
-                    return False
+                options = ensure_list(v)
+                if isinstance(rv, list):
+                    if not any(opt in rv for opt in options):
+                        return False
+                else:
+                    if not any(rv == opt for opt in options):
+                        return False
             return True
 
         def _filter_rows(rows_in: list[dict]) -> list[dict]:
@@ -670,10 +609,21 @@ class Database:
             out = []
             for r in rows_in:
                 ok = True
-                if any_of:
-                    ok = any(_match_clause(r, c) for c in any_of)
-                elif where:
+                if where:
                     ok = _match_clause(r, where)
+                if ok and any_of:
+                    for c in any_of:
+                        if where:
+                            for conflict in where.keys() & c.keys():
+                                c.pop(conflict, None)
+                                logger.warning(
+                                    f"Overlapping key {conflict!r} in 'where' and 'any_of' clause. "
+                                    + "Key will be removed from 'any_of' clause"
+                                )
+                        if _match_clause(r, c):
+                            break
+                    else:
+                        ok = False
                 if ok and q:
                     needle = q.lower()
                     ok = any(
@@ -892,6 +842,7 @@ class Database:
         b64 = base64.b64encode(zlib.compress(raw)).decode("ascii")
         return "DBSYNC LAZY " + b64
 
+    @_requires_cluster
     async def _do_ops(
         self,
         table: str,

@@ -1,12 +1,4 @@
-from components.models.users import (
-    USER_ACLS,
-    UserProfile,
-    User,
-    CredentialPatch,
-    UserPatch,
-    UserProfilePatch,
-    forms,
-)
+from components.models import *
 from components.utils import batch, ensure_list
 from ..utils import *
 
@@ -17,7 +9,7 @@ blueprint = Blueprint("users", __name__, url_prefix="/users")
 @blueprint.context_processor
 def load_context():
     return {
-        "schemas": {"user_profile": forms["user_profile"]},
+        "schemas": {"user_profile": model_forms["users"]["user_profile"]},
         "USER_ACLS": USER_ACLS,
     }
 

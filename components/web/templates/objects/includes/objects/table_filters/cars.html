@@ -11,7 +11,7 @@
       name="_filters"
       value="assigned_users:{{ user_id|string }}"
       class="{{ "active button-blue filter-button" if user_id|string in filters["assigned_users"]|ensurelist else "outline primary filter-button" }}">
-    {{ user_data.name }}
+    {{ user_data.login }}
     </button>
     {% endfor %}
   </div>

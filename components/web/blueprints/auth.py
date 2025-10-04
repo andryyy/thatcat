@@ -1,7 +1,6 @@
 from ..utils import *
 from ..utils.passkeys import *
 from components.logs import logger
-from components.models.users import *
 from components.utils import utc_now_as_str
 from config import defaults
 from secrets import token_urlsafe

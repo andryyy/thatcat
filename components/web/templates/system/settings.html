@@ -34,7 +34,7 @@
       hx-trigger="submit throttle:200ms"
       hx-patch="/system/settings">
       {% with
-        schema=schemas.system_settings,
+        schema=forms.system.settings,
         current_data=settings
       %}
         {% include "includes/form_builder.html" %}

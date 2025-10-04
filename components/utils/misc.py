@@ -18,11 +18,12 @@ def batch(l: list, n: int):
         yield l[ndx : min(ndx + n, _l)]
 
 
-def ensure_list(a: Any | list[Any] | None) -> list:
-    if a:
-        if not isinstance(a, list):
-            return [a]
-        return a
+def ensure_list(x: list | tuple | set | str | None) -> list:
+    if x:
+        if isinstance(x, (list, tuple, set)):
+            return list(x)
+        if isinstance(x, str):
+            return [x]
     return []
 
 

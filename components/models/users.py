@@ -119,10 +119,8 @@ class UserProfile(UserProfileData):
 
         self.permit_auth_requests = to_bool(self.permit_auth_requests)
 
-        print(self.vault)
-        print(type(self.vault))
         if not self.vault:
-            self.vault = {}
+            self.vault = None
         elif isinstance(self.vault, dict):
             self.vault = Vault(**self.vault)
 
@@ -329,42 +327,3 @@ class UserSession:
     lang: str = "en"
     profile: UserProfile | dict = field(default_factory=UserProfile)
     login_ts: float = field(default_factory=ntime_utc_now)
-
-
-forms = {
-    "user_profile": {
-        "vault": {
-            "title": "Vault configuration",
-            "type": "vault",
-            "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
-        },
-        "first_name": {
-            "title": "First name",
-            "type": "text",
-            "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
-        },
-        "last_name": {
-            "title": "Last name",
-            "type": "text",
-            "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
-        },
-        "email": {
-            "title": "Email address",
-            "description": "Optional email address",
-            "type": "email",
-            "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
-        },
-        "access_tokens": {
-            "title": "API keys",
-            "description": "API keys can be used for programmatic access",
-            "type": "list:text",
-            "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
-        },
-        "permit_auth_requests": {
-            "title": "Interactive sign-in requests",
-            "description": "Show a dialog on sign-in requests to signed in users to quickly confirm access",
-            "type": "toggle",
-            "input_extra": 'autocomplete="off"',
-        },
-    }
-}

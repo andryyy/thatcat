@@ -1,16 +1,7 @@
 from ..utils import *
-from components.models.users import User, UserProfile, UserProfilePatch, forms
 
 
 blueprint = Blueprint("profile", __name__, url_prefix="/profile")
-
-
-@blueprint.context_processor
-def load_context():
-    context = {
-        "schemas": {"user_profile": forms["user_profile"]},
-    }
-    return context
 
 
 @blueprint.route("/")

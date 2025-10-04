@@ -43,13 +43,3 @@ class SystemSettings(SystemSettingsData, SystemSettingsBase):
             self.GOOGLE_VISION_API_KEY = (
                 to_str(self.GOOGLE_VISION_API_KEY.strip()) or None
             )
-
-
-form = {
-    "GOOGLE_VISION_API_KEY": {
-        "title": "Google Vision API",
-        "description": "API key for Google Vision",
-        "type": "text",
-        "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
-    }
-}

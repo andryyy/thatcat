@@ -4,7 +4,6 @@ import json
 import os
 
 from ..utils import *
-from components.models.system import SystemSettings, SystemSettingsPatch, form
 from components.utils import batch, datetime
 from components.logs import logger
 from config import defaults
@@ -14,14 +13,6 @@ blueprint = Blueprint("system", __name__, url_prefix="/system")
 LOG_LOCK = asyncio.Lock()
 APP_LOGS_FULL_PULL = dict()
 APP_LOGS_LAST_REFRESH = None
-
-
-@blueprint.context_processor
-def load_context():
-    return {
-        "schemas": {"system_settings": form},
-    }
-    return context
 
 
 @blueprint.route("/status/refresh", methods=["POST"])

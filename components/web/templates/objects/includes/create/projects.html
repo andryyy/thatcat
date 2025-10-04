@@ -1,6 +1,6 @@
 <form class="create-object" hx-trigger="submit throttle:200ms" hx-post="/objects/projects">
   {% with
-    schema=schemas[request.view_args.object_type],
+    schema=forms.objects[request.view_args.object_type],
     current_data={},
     fields=["name"]
   %}

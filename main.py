@@ -3,7 +3,7 @@ import signal
 import ssl
 
 from components.cluster import cluster
-from components.database import db, build_indexes_and_list_views
+from components.database import db
 from components.logs import logger
 from components.web.app import app
 from config import defaults
@@ -50,7 +50,14 @@ async def main():
     try:
         async with asyncio.TaskGroup() as tg:
             async with db:
-                await build_indexes_and_list_views(db)
+                await db.build_index(
+                    "cars", ["id", "vin", "assigned_users", "assigned_project"]
+                )
+                await db.build_index("projects", ["id", "name", "assigned_users"])
+                await db.build_index("users", ["id", "login", "credentials.id", "acl"])
+                await db.build_index("processings", ["id", "assigned_user"])
+                db.cluster = cluster
+
             tg.create_task(
                 serve(
                     ProxyFixMiddleware(app, mode="legacy", trusted_hops=1),

@@ -106,6 +106,7 @@ def load_defaults():
     }
     context["L"] = LANG[request.USER_LANG]
     context["generate_form_id"] = generate_form_id
+    context["forms"] = model_forms
     return context
 
 

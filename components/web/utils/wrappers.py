@@ -3,8 +3,7 @@ from .quart import abort, redirect, request, session, url_for, websocket
 from components.database import db
 from components.database.states import STATE
 from components.logs import logger
-from components.models.users import User, UserSession
-from components.models.objects import model_meta
+from components.models import *
 from components.utils import ensure_list, unique_list
 from config import defaults
 from functools import wraps
@@ -185,7 +184,7 @@ def formoptions(options: list):
                         row["id"]: row for row in rows["items"]
                     }
 
-                elif option in model_meta["types"]:
+                elif option in model_meta["objects"]["types"]:
                     async with db:
                         rows = await db.list_rows(option, page_size=-1)
 
