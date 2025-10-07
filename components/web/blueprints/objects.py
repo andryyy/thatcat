@@ -1,5 +1,12 @@
-from components.utils import ensure_list, unique_list
-from ..utils import *
+from components.utils.misc import ensure_list, unique_list
+from quart import Blueprint, abort, render_template, request, session
+from components.web.utils.wrappers import acl, formoptions
+from components.web.utils.notifications import trigger_notification
+from components.web.utils.utils import render_or_json
+from components.web.utils.tables import table_search_helper
+from components.database import db
+from components.models import model_meta
+from dataclasses import asdict
 
 blueprint = Blueprint("objects", __name__, url_prefix="/objects")
 
@@ -183,10 +190,7 @@ async def delete_object(object_type: str, object_id: str | None = None):
 @blueprint.route("/<object_type>/<object_id>", methods=["PATCH"])
 async def patch_object(object_type: str, object_id: str | None = None):
     object_ids = request._objects.keys()
-
-    patch_model = model_meta["objects"]["patch"][object_type]
-    base_model = model_meta["objects"]["base"][object_type]
-    patch_data = patch_model(**request.form_parsed)
+    patch_data = model_meta["objects"]["patch"][object_type](**request.form_parsed)
 
     if not "system" in session["acl"]:
         for f in model_meta["objects"]["system_fields"][object_type]:
@@ -195,7 +199,7 @@ async def patch_object(object_type: str, object_id: str | None = None):
 
     async with db:
         for id_ in object_ids:
-            patched_object = replace(request._objects[id_], **patch_data.dump_patched())
+            patched_object = patch_data.merge(request._objects[id_])
 
             # Check for uniqueness
             unique_filters = {

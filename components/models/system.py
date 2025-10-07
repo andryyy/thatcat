@@ -1,4 +1,4 @@
-from components.utils import utc_now_as_str
+from components.utils.datetimes import utc_now_as_str
 from components.models.helpers import *
 from dataclasses import dataclass, field, fields
 

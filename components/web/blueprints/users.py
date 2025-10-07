@@ -1,6 +1,14 @@
-from components.models import *
-from components.utils import batch, ensure_list
-from ..utils import *
+from quart import Blueprint, abort, render_template, request, session
+from components.web.utils.wrappers import acl, formoptions
+from components.web.utils.notifications import trigger_notification
+from components.web.utils.utils import render_or_json
+from components.web.utils.tables import table_search_helper
+from components.database import db
+from components.database.states import STATE
+from components.models import User, CredentialPatch, UserPatch
+from components.models.users import USER_ACLS
+from components.utils.misc import batch, ensure_list
+from dataclasses import asdict, replace
 
 
 blueprint = Blueprint("users", __name__, url_prefix="/users")
@@ -9,7 +17,6 @@ blueprint = Blueprint("users", __name__, url_prefix="/users")
 @blueprint.context_processor
 def load_context():
     return {
-        "schemas": {"user_profile": model_forms["users"]["user_profile"]},
         "USER_ACLS": USER_ACLS,
     }
 

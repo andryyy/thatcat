@@ -6,7 +6,7 @@ import zlib
 
 from .plugin import CommandPlugin
 from components.models.cluster import ErrorMessages
-from components.utils import is_path_within_cwd
+from components.utils.misc import is_path_within_cwd
 from components.utils.files import export_meta
 from contextlib import suppress
 

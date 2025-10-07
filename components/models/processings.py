@@ -1,7 +1,7 @@
 from components.models.assets import Asset
 from components.models.coords import Location
 from components.models.helpers import *
-from components.utils import utc_now_as_str
+from components.utils.datetimes import utc_now_as_str
 from dataclasses import dataclass, field, asdict
 from uuid import uuid4
 

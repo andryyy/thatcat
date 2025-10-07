@@ -2968,6 +2968,14 @@ textarea,
   --pico-line-height: 1.4;
 }
 
+.shine {
+  text-decoration: none !important;
+  background: linear-gradient(135deg, currentColor 0%, color-mix(in srgb, currentColor 80%, white) 25%, color-mix(in srgb, currentColor 60%, white) 50%, color-mix(in srgb, currentColor 80%, white) 75%, currentColor 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
 small {
   font-size: 0.875rem;
   color: var(--pico-muted-color);

@@ -1,5 +1,5 @@
 from config import defaults
-from components.utils import ensure_list
+from components.utils.misc import ensure_list
 from components.models.helpers import *
 from dataclasses import dataclass, field
 from config.defaults import TABLE_PAGE_SIZE

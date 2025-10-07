@@ -1,74 +1,53 @@
+"""Cluster server module for managing peer-to-peer communication and distributed locking."""
+
 import asyncio
 import random
 import string
 
 from config import defaults
-from contextlib import suppress
+from .base import ServerBase, ALPHABET, MESSAGE_SIZE_BYTES
 from .cli import cli_processor
 from .exceptions import *
 from .ssl import get_ssl_context
 from components.logs import logger
-from components.models.cluster import (
-    ConnectionStatus,
-    ErrorMessages,
-    IncomingData,
-    Role,
-    MetaData,
-    READER_DATA_PATTERN,
-)
-from components.utils import ntime_utc_now, unique_list, ensure_list
+from components.models.cluster import ErrorMessages, Role
+from components.utils.datetimes import ntime_utc_now
+from components.utils.misc import unique_list, ensure_list
 
-ALPHABET = string.ascii_lowercase + string.digits
+# Server configuration constants
+DEFAULT_SERVER_LIMIT = 104857600  # 100 MiB
+DEFAULT_LOCKING_TIMEOUT = 30.0  # seconds
+DEFAULT_COMMAND_TIMEOUT = 5.0  # seconds
+LOCK_ID_LENGTH = 8
 
 
-class Server:
+class Server(ServerBase):
+    """
+    Cluster server managing peer-to-peer communication, command dispatch, and distributed locking.
+
+    Handles incoming connections from cluster peers, processes commands through registered plugins,
+    manages distributed locks across the cluster, and coordinates with peers in leader/follower roles.
+    """
+
     def __init__(self, port):
         self.locks = dict()
         self.port = port
         self.callbacks = dict()
         self.temp_data = dict()
-        self.stop_event = None
-        self.server_limit = 104857600  # 100 MiB
+        self.shutdown_trigger = None
+        self.server_limit = DEFAULT_SERVER_LIMIT
         self.tasks = set()
-        self.locking_timeout = 30.0  # time to spend acquiring a lock
+        self.locking_timeout = DEFAULT_LOCKING_TIMEOUT
         self._sending_incr = 0
 
     def register_command(self, plugin: "CommandPlugin"):
+        """Register a command plugin with the server."""
         self.registry.register(plugin)
-
-    def _release_locks(self, lock_id: str, lock_objects: list | set):
-        for l in ensure_list(unique_list(lock_objects)):
-            if lock_id != self.locks[l]["id"]:
-                logger.error("Cannot release due to id<>lock_object mismatch")
-            elif l in self.locks:
-                with suppress(RuntimeError):
-                    self.locks[l]["lock"].release()
-                self.locks[l]["id"] = None
-
-    def _incoming_parser(self, input_bytes: bytes) -> IncomingData:
-        try:
-            input_decoded = input_bytes.strip().decode("utf-8")
-            match = READER_DATA_PATTERN.search(input_decoded)
-            data = match.groupdict()
-
-            return IncomingData(
-                ticket=data["ticket"],
-                cmd=data["cmd"],
-                payload=data["payload"],
-                meta=MetaData(
-                    cluster=data["cluster"],
-                    leader=data["leader"],
-                    started=data["started"],
-                    name=data["name"],
-                ),
-            )
-        except Exception as e:
-            logger.critical(e)
-            raise IncomingDataError(e)
 
     async def incoming_handler(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ):
+        """Handle incoming connections from peers or CLI."""
         socket, *_ = writer.get_extra_info("socket").getsockname()
         raddr, *_ = writer.get_extra_info("peername")
         peer_init = False
@@ -86,45 +65,26 @@ class Server:
 
         while True:
             try:
-                bytes_to_read = int.from_bytes(await reader.readexactly(4), "big")
+                bytes_to_read = int.from_bytes(
+                    await reader.readexactly(MESSAGE_SIZE_BYTES), "big"
+                )
                 input_bytes = await reader.readexactly(bytes_to_read)
-                logger.debug(f"Read {bytes_to_read + 4} bytes from {raddr}")
+                logger.debug(
+                    f"Read {bytes_to_read + MESSAGE_SIZE_BYTES} bytes from {raddr}"
+                )
 
                 data = self._incoming_parser(input_bytes)
+                await self._validate_and_setup_peer(peer, raddr, data)
 
-                if data.meta.name != peer.name:
-                    raise Exception(f"Expected {data.meta.name}, got {peer.name}")
-
-                if not peer.streams.egress:
-                    con, status = await self.peers.connect(data.meta.name)
-                    if not con:
-                        raise Exception(f"Error connecting {data.meta.name}: {status}")
-
-                if peer.meta and (float(data.meta.started) < float(peer.meta.started)):
-                    raise Exception(f"Inplausible started stamp from {data.meta.name}")
-
-                peer.meta = data.meta
-
-                if not peer_init and data.cmd != "BYE" and not self.stop_event.is_set():
+                if (
+                    not peer_init
+                    and data.cmd != "BYE"
+                    and not self.shutdown_trigger.is_set()
+                ):
                     peer_init = True
-                    await self.monitor.peer(peer.meta.name)
+                    await self.watchdog.peer(peer.meta.name)
 
-                for plugin in self.registry.all():
-                    if data.cmd == plugin.name:
-                        reply_command = await plugin.dispatch(self, data)
-                        if reply_command:
-                            await self.send_command(
-                                reply_command,
-                                peer.meta.name,
-                                ticket=data.ticket,
-                            )
-                        break
-                else:
-                    await self.send_command(
-                        ErrorMessages.UNKNOWN_COMMAND.response,
-                        peer.meta.name,
-                        ticket=data.ticket,
-                    )
+                await self._process_command(data, peer.meta.name)
             except CommandFailed:
                 await self.send_command(
                     ErrorMessages.COMMAND_FAILED.response,
@@ -152,23 +112,10 @@ class Server:
         peers: str | list = "*",
         ticket: str | None = None,
         raise_err=True,
-        timeout: float = 5.0,
+        timeout: float = DEFAULT_COMMAND_TIMEOUT,
     ) -> str | None:
-        if not self.stop_event:
-            raise ServerNotRunning(self.stop_event)
-
-        if not all(
-            isinstance(v, t)
-            for v, t in [
-                (raise_err, bool),
-                (timeout, (float, int)),
-                (ticket, (str, type(None))),
-                (peers, (str, list)),
-                (cmd, str),
-            ]
-        ):
-            raise ValueError("Invalid argument type")
-
+        """Send a command to one or more peers and optionally wait for response."""
+        self._validate_send_command_params(cmd, peers, ticket, raise_err, timeout)
         timeout = float(timeout)
         cmd_name, _, payload = cmd.partition(" ")
 
@@ -179,7 +126,7 @@ class Server:
         is_callback = cmd_name in {"OK", "ERR", "DATA"}
         requires_callback = not is_callback and cmd_name not in {"BYE", "INIT"}
 
-        if self.stop_event.is_set() and cmd_name != "BYE":
+        if self.shutdown_trigger.is_set() and cmd_name != "BYE":
             return None
 
         if is_callback:
@@ -225,20 +172,11 @@ class Server:
                         f"Skipping shutdown peer {peer} ({cmd_name}/{ticket})"
                     )
 
-        buffer_data = [
-            ticket,
-            f"{cmd_name} {payload}",
-            ":META",
-            f"NAME {self.peers.local.name}",
-            f"CLUSTER {self.peers.local.cluster or '?CONFUSED'}",
-            f"STARTED {self.peers.local.started}",
-            f"LEADER {self.peers.local.leader or '?CONFUSED'}",
-        ]
-        buffer_bytes = " ".join(buffer_data).encode("utf-8")
+        buffer_bytes = self._build_message_buffer(ticket, cmd_name, payload)
 
         async def _write_data(peer_lock, writer, buffer_bytes):
             async with peer_lock:
-                writer.write(len(buffer_bytes).to_bytes(4, "big"))
+                writer.write(len(buffer_bytes).to_bytes(MESSAGE_SIZE_BYTES, "big"))
                 writer.write(buffer_bytes)
                 await writer.drain()
 
@@ -273,7 +211,7 @@ class Server:
             log += f", calling back {ticket}"
         elif requires_callback:
             log += f", requesting callback to {ticket}"
-        logger.info(f"{log} ({len(buffer_bytes) + 4} bytes)")
+        logger.info(f"{log} ({len(buffer_bytes) + MESSAGE_SIZE_BYTES} bytes)")
 
         if not requires_callback:
             return True, {}
@@ -302,14 +240,15 @@ class Server:
             return True, responses
 
     async def release(self, lock_id: str, lock_objects: list | set) -> None:
+        """Release distributed locks across the cluster."""
         if not isinstance(lock_id, str) or lock_id == "":
-            raise ValueError(f"The 'lock_id' parameter must be a non-empty string")
+            raise ValueError("The 'lock_id' parameter must be a non-empty string")
 
         lock_objects = ensure_list(unique_list(lock_objects))
 
         if not lock_objects:
             raise ValueError(
-                f"The 'lock_objects' parameter must be a non-empty list or set"
+                "The 'lock_objects' parameter must be a non-empty list or set"
             )
 
         if self.peers.local.role == Role.FOLLOWER:
@@ -319,72 +258,49 @@ class Server:
                     self.peers.local.leader,
                     raise_err=True,
                 )
-            except ResponseError as e:
+            except ResponseError:
                 raise LockException("Leader did not respond properly to unlock request")
         elif self.peers.local.role == Role.LEADER:
             self._release_locks(lock_id, lock_objects)
 
     async def acquire_lock(self, lock_objects: list | set) -> str:
-        locked_objects = set()
-        start = ntime_utc_now()
-        lock_id = "".join(random.choices(ALPHABET, k=8))
+        """Acquire distributed locks across the cluster. Returns lock_id."""
         lock_objects = ensure_list(unique_list(lock_objects))
 
         if not lock_objects:
             raise ValueError(
-                f"The 'lock_objects' parameter must be a non-empty list or set"
+                "The 'lock_objects' parameter must be a non-empty list or set"
             )
+
+        lock_id = "".join(random.choices(ALPHABET, k=LOCK_ID_LENGTH))
+        start = ntime_utc_now()
 
         try:
             if self.peers.local.role == Role.LEADER:
-                for l in lock_objects:
-                    if l not in self.locks:
-                        self.locks[l] = {
-                            "lock": asyncio.Lock(),
-                            "id": None,
-                        }
-                    await self.locks[l]["lock"].acquire(),
-                    locked_objects.add(l)
-                    self.locks[l]["id"] = lock_id
+                await self._acquire_leader_locks(lock_id, lock_objects)
             elif self.peers.local.role == Role.FOLLOWER:
-                if not self.peers.local.leader:
-                    raise ClusterException("Leader is not elected yet")
-
-                while (ntime_utc_now() - start) < self.locking_timeout:
-                    result, responses = await self.send_command(
-                        f"LOCK {lock_id} {','.join(lock_objects)}",
-                        self.peers.local.leader,
-                        raise_err=False,
-                    )
-                    if responses[self.peers.local.leader] == "BUSY":
-                        await asyncio.sleep(0.1)
-                        continue
-                    elif not result:
-                        if ErrorMessages.PEERS_MISMATCH in responses:
-                            raise LockException("Lock rejected due to inconsistency")
-                        else:
-                            raise LockException(
-                                f"Cannot acquire lock from leader ({responses})"
-                            )
-                    else:
-                        break
-                else:
-                    raise LockException("Cannot acquire lock")
+                await self._acquire_follower_locks(lock_id, lock_objects, start)
 
             return lock_id
 
         except Exception as e:
-            if self.peers.local.role == Role.LEADER:
-                self._release_locks(lock_id, locked_objects)
-            if isinstance(e, ClusterException):
+            if isinstance(e, (ClusterException, LockException)):
                 raise
             elif isinstance(e, TimeoutError):
-                raise LockException(f"Timeout acquiring local lock")
+                raise LockException("Timeout acquiring local lock")
             raise LockException(f"Unhandled exception: {str(e)}")
 
     async def run(
-        self, stop_event: asyncio.Event, post_stop_event: asyncio.Event
+        self,
+        shutdown_trigger: asyncio.Event,
+        shutdown_hook: asyncio.Event | None = None,
     ) -> None:
+        """
+        Run the cluster server.
+
+        Starts the server, initializes peer connections, monitors the cluster,
+        and handles graceful shutdown when shutdown_trigger is set.
+        """
         self.server = await asyncio.start_server(
             self.incoming_handler,
             self.peers.local.server_bindings,
@@ -393,7 +309,13 @@ class Server:
             limit=self.server_limit,
         )
 
-        self.stop_event = stop_event
+        self.shutdown_trigger = shutdown_trigger
+
+        if not isinstance(shutdown_hook, asyncio.Event):
+            logger.warning(
+                "Ignoring 'shutdown_hook': value must be of type asyncio.Event"
+            )
+            shutdown_hook = None
 
         logger.info(
             f"Listening on {self.port} on address {' and '.join(self.peers.local.server_bindings)}..."
@@ -404,20 +326,20 @@ class Server:
             for local_rbind in self.peers.local.server_bindings:
                 if local_rbind not in binds:
                     logger.critical(f"Could not bind requested address {local_rbind}")
-                    stop_event.set()
+                    shutdown_trigger.set()
                     return
 
             sent = await self.send_command("INIT", "*")
 
-            t = asyncio.create_task(self.monitor.server(), name="tickets")
+            t = asyncio.create_task(self.watchdog.server(), name="tickets")
             self.tasks.add(t)
             t.add_done_callback(self.tasks.discard)
 
             try:
-                await stop_event.wait()
+                await shutdown_trigger.wait()
                 raise asyncio.CancelledError("Shutting down")
             except asyncio.CancelledError:
-                stop_event.set()
+                shutdown_trigger.set()
             finally:
                 logger.info("Starting cluster shutdown")
                 if self.peers.get_established():
@@ -438,5 +360,6 @@ class Server:
                 ):
                     logger.error(results)
 
-                logger.info("Completed cluster shutdown, requesting app shutdown")
-                post_stop_event.set()
+                if shutdown_hook is not None:
+                    logger.info("Completed cluster shutdown, setting shutdown hook")
+                    shutdown_hook.set()

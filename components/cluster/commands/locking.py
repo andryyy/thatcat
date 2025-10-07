@@ -14,25 +14,12 @@ class LockCommand(CommandPluginLeader):
         try:
             lock_id, lock_objects = data.payload.split(" ")
             lock_objects = lock_objects.split(",")
-            locked_objects = set()
-            for l in lock_objects:
-                if l not in cluster.locks:
-                    cluster.locks[l] = {
-                        "lock": asyncio.Lock(),
-                        "id": None,
-                    }
-                await asyncio.wait_for(
-                    cluster.locks[l]["lock"].acquire(),
-                    0.05 + random.uniform(0.05, 0.1),
-                )
-                locked_objects.add(l)
-                cluster.locks[l]["id"] = lock_id
+            timeout = 0.05 + random.uniform(0.05, 0.1)
+            await cluster._acquire_leader_locks(lock_id, lock_objects, timeout)
         except TimeoutError:
-            cluster._release_locks(lock_id, locked_objects)
             return "OK BUSY"
         except Exception as e:
             logger.critical(f"Unhandled LOCK error: {str(e)}")
-            cluster._release_locks(lock_id, locked_objects)
             return ErrorMessages.LOCK_ERROR.response
         else:
             return "OK"

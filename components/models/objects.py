@@ -1,10 +1,13 @@
 from components.models.helpers import *
 from components.models.assets import Asset
 from components.models.coords import Location
-from components.utils import ensure_list, utc_now_as_str, VinTool, unique_list
-from dataclasses import dataclass, field, fields, asdict
+from components.utils.datetimes import utc_now_as_str
+from components.utils.misc import ensure_list, unique_list
+from components.utils.vins import VinTool
+from dataclasses import dataclass, field, fields, asdict, replace
 from quart.sessions import SecureCookieSession
 from uuid import uuid4
+from typing import Protocol
 
 
 @dataclass
@@ -83,6 +86,9 @@ class ObjectAddProject(ObjectProjectData):
 
 @dataclass
 class PatchTemplate:
+    def merge(self, original: Protocol):
+        return replace(original, **self.dump_patched())
+
     def dump_patched(self):
         return {
             f.name: getattr(self, f.name)

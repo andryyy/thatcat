@@ -50,12 +50,6 @@ async def main():
     try:
         async with asyncio.TaskGroup() as tg:
             async with db:
-                await db.build_index(
-                    "cars", ["id", "vin", "assigned_users", "assigned_project"]
-                )
-                await db.build_index("projects", ["id", "name", "assigned_users"])
-                await db.build_index("users", ["id", "login", "credentials.id", "acl"])
-                await db.build_index("processings", ["id", "assigned_user"])
                 db.cluster = cluster
 
             tg.create_task(
@@ -68,13 +62,11 @@ async def main():
             )
             tg.create_task(
                 cluster.run(
-                    stop_event=cluster_stop_event, post_stop_event=app.stop_event
+                    shutdown_trigger=cluster_stop_event, shutdown_hook=app.stop_event
                 ),
                 name="cluster",
             )
             await app.stop_event.wait()
-            logger.info("Waiting for graceful shutdown")
-            await asyncio.sleep(hypercorn_config.shutdown_timeout + 0.5)
             raise TerminateTaskGroup()
 
     except* Exception as e:

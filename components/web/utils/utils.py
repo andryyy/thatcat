@@ -1,4 +1,4 @@
-from .quart import render_template, request
+from quart import render_template, request
 from components.database import db
 from components.database.states import STATE
 from components.models.users import USER_ACLS

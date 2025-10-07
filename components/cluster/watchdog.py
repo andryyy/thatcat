@@ -4,12 +4,12 @@ import ssl
 from components.logs import logger
 
 
-class Monitor:
+class Watchdog:
     def __init__(self, cluster: "Server"):
         self.cluster = cluster
 
     async def server(self):
-        while not self.cluster.stop_event.is_set():
+        while not self.cluster.shutdown_trigger.is_set():
             await asyncio.sleep(1)
             if not self.cluster.peers.local.cluster_complete.is_set():
                 try:
@@ -53,7 +53,7 @@ class Monitor:
 
             except asyncio.CancelledError:
                 logger.info(f"Stopping monitoring of {name}")
-                if self.cluster.stop_event.is_set():
+                if self.cluster.shutdown_trigger.is_set():
                     raise
                 break
             except TimeoutError:

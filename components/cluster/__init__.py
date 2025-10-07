@@ -5,13 +5,13 @@ from .commands.files import FileDelCommand, FileGetCommand, FilePutCommand
 from .commands.locking import LockCommand, UnlockCommand
 from .commands.status import ByeCommand, InitCommand, StatusCommand
 from .files import Files
-from .monitor import Monitor
+from .watchdog import Watchdog
 from .peers import Peers
 from .server import Server
 
 cluster = Server(port=2102)
 cluster.peers = Peers(cluster)
-cluster.monitor = Monitor(cluster)
+cluster.watchdog = Watchdog(cluster)
 cluster.files = Files(cluster)
 cluster.registry = CommandRegistry()
 cluster.register_command(OkCommand())

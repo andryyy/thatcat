@@ -2,8 +2,12 @@ import asyncio
 import json
 import os
 
-from components.utils.osm import display_name_to_location
-from ..utils import *
+from components.utils.osm import display_name_to_location, CoordsResolver
+from quart import Blueprint, abort, current_app, redirect, render_template, send_from_directory, session, url_for, websocket
+from components.web.utils.wrappers import acl, session_clear, websocket_acl
+from components.cluster import cluster
+from components.cluster.files import FileGetException
+from components.database.states import STATE
 
 blueprint = Blueprint("main", __name__, url_prefix="/")
 HS_DIR = os.path.abspath("components/web/templates/_hs")
@@ -30,6 +34,12 @@ async def hs_script(script_file: str):
 @acl("user")
 async def location_lookup(q: str):
     return await display_name_to_location(q)
+
+
+@blueprint.route("/location/resolve/<coords>")
+@acl("user")
+async def coords_resolver(coords: str):
+    return await CoordsResolver(coords).aresolve()
 
 
 @blueprint.route("/asset/<asset_id>")

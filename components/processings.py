@@ -6,8 +6,9 @@ from components.logs import logger
 from components.models.assets import Asset
 from components.models.processings import ProcessingAdd, uuid4
 from components.models.system import SystemSettings
-from components.utils import ImageExif, UnidentifiedImageError, VinTool
-from components.web.utils.quart import session
+from components.utils.exif import ImageExif, UnidentifiedImageError
+from components.utils.vins import VinTool
+from quart import session
 from dataclasses import asdict
 
 processing_limiter = asyncio.Semaphore(3)

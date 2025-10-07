@@ -1,7 +1,6 @@
 import json
 import re
 
-from components.utils import coords_to_display_name
 from uuid import UUID
 
 
@@ -30,14 +29,15 @@ def validate_uuid_str(value: str) -> str:
 
 def to_location(val: dict | object) -> "Location":
     from .coords import Location
+    from components.utils.osm import CoordsResolver
 
     if isinstance(val, Location):
         if val.lon == 0.0 or val.lat == 0.0:
             return None
         if not val.display_name:
             try:
-                val.display_name = coords_to_display_name(val.coords)
-            except Exception as e:
+                val.display_name = CoordsResolver(val.coords).resolve()
+            except:
                 val.display_name = ""
         return val
     try:

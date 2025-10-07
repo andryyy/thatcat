@@ -1,4 +1,4 @@
-from .quart import session
+from quart import session
 from components.models.tables import TableSearch
 
 

@@ -1,29 +1,37 @@
 import json
-from config.defaults import OSM_EMAIL, HOSTNAME
+
 from .requests import async_request, sync_request
+from components.logs import logger
+from config.defaults import HOSTNAME, OSM_EMAIL
+from components.database.states import STATE
 
 
-def coords_to_display_name(coords: str):
-    from components.database.states import STATE
+class CoordsResolver:
+    def __init__(self, coords: str):
+        if not isinstance(coords, str):
+            raise ValueError(
+                f"'coords' must be a string, but got {type(coords).__name__}."
+            )
 
-    if not isinstance(coords, str):
-        raise ValueError(f"'coords' must be a string, but got {type(coords).__name__}.")
+        try:
+            lat_str, lon_str = coords.split(",")
+            self.lat = float(lat_str)
+            self.lon = float(lon_str)
+            self.coords = coords
+            assert self.lon and self.lat
+        except (ValueError, TypeError, AssertionError):
+            raise ValueError(f"Invalid coordinate string: {coords}")
 
-    try:
-        lat_str, lon_str = coords.split(",")
-        lat = float(lat_str)
-        lon = float(lon_str)
-        assert lon and lat
-    except (ValueError, TypeError, AssertionError):
-        raise ValueError(f"Invalid coordinate string: {coords}")
+        self.display_name = None
+        if STATE.locations.get(coords):
+            self.display_name = STATE.locations[coords]
 
-    if STATE.locations.get(coords):
-        return STATE.locations[coords]
-
-    else:
+    def resolve(self, force: bool = False):
+        if self.display_name and not force:
+            return self.display_name
         try:
             status_code, response_text = sync_request(
-                f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json&addressdetails=0&email={OSM_EMAIL}",
+                f"https://nominatim.openstreetmap.org/reverse?lat={self.lat}&lon={self.lon}&format=json&addressdetails=0&email={OSM_EMAIL}",
                 "GET",
                 headers={
                     "User-Agent": f"coords_to_display_name() - Thank you! - Contact: {OSM_EMAIL}",
@@ -32,9 +40,31 @@ def coords_to_display_name(coords: str):
             )
             if status_code == 200:
                 response_text = json.loads(response_text)
-                STATE.locations[coords] = response_text["display_name"]
+                STATE.locations[self.coords] = response_text["display_name"]
                 return response_text["display_name"]
-        except:
+        except Exception as e:
+            logger.error(f"Cannot resolve coords: {e}")
+            return None
+
+    async def aresolve(self, force: bool = False):
+        if self.display_name and not force:
+            return self.display_name
+
+        try:
+            status_code, response_text = await async_request(
+                f"https://nominatim.openstreetmap.org/reverse?lat={self.lat}&lon={self.lon}&format=json&addressdetails=0&email={OSM_EMAIL}",
+                "GET",
+                headers={
+                    "User-Agent": f"coords_to_display_name() - Thank you! - Contact: {OSM_EMAIL}",
+                    "Referer": f"https://{HOSTNAME}",
+                },
+            )
+            if status_code == 200:
+                response_text = json.loads(response_text)
+                STATE.locations[self.coords] = response_text["display_name"]
+                return response_text["display_name"]
+        except Exception as e:
+            logger.error(f"Cannot resolve coords: {e}")
             return None
 
 

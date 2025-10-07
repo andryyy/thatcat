@@ -1,4 +1,9 @@
-from ..utils import *
+from quart import Blueprint, redirect, render_template, request, session, url_for
+from components.web.utils.wrappers import acl, session_clear
+from components.web.utils.notifications import trigger_notification
+from components.database import db
+from components.models import User, UserProfilePatch
+from dataclasses import asdict, replace
 
 
 blueprint = Blueprint("profile", __name__, url_prefix="/profile")
@@ -31,6 +36,11 @@ async def user_profile_patch():
         patch_data = UserProfilePatch(**request.form_parsed)
         user.profile = replace(user.profile, **patch_data.dump_patched())
         user_dict = asdict(user)
+
+        trigger = {}
+        if session["profile"]["vault"] != user_dict["profile"]["vault"]:
+            trigger = {"profileUpdate": {"vault": user_dict["profile"]["vault"]}}
+
         session["profile"]["vault"] = user_dict["profile"]["vault"]
         await db.patch(
             "users",
@@ -47,7 +57,5 @@ async def user_profile_patch():
         response_code=204,
         title="Profile updated",
         message="Your profile was updated",
-        additional_triggers={
-            "profileUpdate": {"vault": user_dict["profile"]["vault"]},
-        },
+        additional_triggers=trigger,
     )

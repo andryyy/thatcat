@@ -28,17 +28,18 @@
 <div id="system-status">
   <section id="system-status-cards" class="grid-auto-cols">
     <article>
-      <h6>{{ data.status.CLUSTER_PEERS_LOCAL.name }} 🏠</h6>
-      <p>
-        <small>This node.</small>
-      </p>
+      <h6>{{ data.status.CLUSTER_PEERS_LOCAL.name }} <span class="color-blue-400">This node</span></h6>
       <ul>
-      {% for k, v in data.status.CLUSTER_PEERS_LOCAL %}
-        <li><span class="color-zinc-600">{{ k.split("_")|join(" ")|capitalize }}</span>:
-        {% if k == "cluster_complete" and not v.is_set() %}
-          <span class="color-red">{{ v }}</span>
+      {% for field in data.status.CLUSTER_PEERS_LOCAL.__dataclass_fields__ %}
+        <li><span class="color-zinc-600">{{ field.split("_")|join(" ")|capitalize }}</span>:
+        {% if field == "cluster_complete" %}
+          {% if not data.status.CLUSTER_PEERS_LOCAL[field].is_set() %}
+          <span class="color-red">Cluster incomplete</span>
+          {% else %}
+          OK
+          {% endif %}
         {% else %}
-          {{ v }}<br>
+          {{ data.status.CLUSTER_PEERS_LOCAL[field] }}
         {% endif %}
         </li>
       {% endfor %}
@@ -46,15 +47,31 @@
     </article>
     {% for peer, peer_data in data.status.CLUSTER_PEERS_REMOTE_PEERS.items() %}
     <article>
-      <h6>{{ peer }} {% if peer == data.status.CLUSTER_PEERS_LOCAL.leader %}👑{% endif %}</h6>
+      <h6>{{ peer }} {% if peer == data.status.CLUSTER_PEERS_LOCAL.leader %}<span class="color-green-400">Leader</span>{% endif %}</h6>
       <ul>
-      {% for k, v in peer_data %}
-        <li><span class="color-zinc-600">{{ k.split("_")|join(" ")|capitalize }}</span>:
-        {% if k == "streams" %}
-          {% if v.ingress %}Ingress stream OK{% else %}<span class="color-red">Ingress stream failed</span>{% endif %},
-          {% if v.egress %}Egress stream OK{% else %}<span class="color-red">Egress stream failed</span>{% endif %}<br>
+      {% for field in peer_data.__dataclass_fields__ %}
+        <li><span class="color-zinc-600">{{ field.split("_")|join(" ")|capitalize }}</span>:
+        {% if field == "streams" %}
+          <ul>
+          {% if peer_data[field].ingress %}
+            <li>Ingress stream OK</li>
+          {% else %}
+            <li><span class="color-red">Ingress stream failed</span></li>
+          {% endif %}
+          {% if peer_data[field].egress %}
+            <li>Egress stream OK</li>
+          {% else %}
+            <li><span class="color-red">Egress stream failed</span></li>
+          {% endif %}
+          </ul>
+        {% elif field == "meta" %}
+          <ul>
+          {% for meta_field in peer_data[field].__dataclass_fields__ %}
+            <li><span class="color-zinc-600">{{ meta_field.split("_")|join(" ")|capitalize }}</span>: {{ peer_data[field][meta_field] }}</li>
+          {% endfor %}
+          </ul>
         {% else %}
-          {{ v }}<br>
+          {{ peer_data[field] }}
         {% endif %}
         </li>
       {% endfor %}
@@ -65,7 +82,7 @@
 </div>
 <hr>
 
-<p class="no-text-wrap">
+<p>
   <small>
     <sup>1</sup> Critical protocol errors (e.g. checksum mismatches).<br>
     <sup>2</sup> The cluster peer's meta data is updated in transaction (lazy-update).<br>

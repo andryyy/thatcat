@@ -1,6 +1,6 @@
 import json
 
-from .quart import request
+from quart import request
 from components.utils.lang import LANG
 from components.logs import logger
 

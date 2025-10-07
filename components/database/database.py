@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 import asyncio, json, zlib, base64, contextvars
-from .mappings import mappings, _default_list_row
-from pathlib import Path
-from typing import Dict, Any, Optional, List, Set, Tuple
+
 from collections import OrderedDict
-from contextlib import asynccontextmanager
-from components.logs import logger
-from components.utils import ensure_list
-from components.models import model_meta
 from components.cluster.exceptions import ClusterException
+from components.database.helpers import (
+    create_sort_key,
+    filter_rows,
+    get_all,
+    match_clause,
+    merge_dict,
+    paginate_rows,
+)
+from components.logs import logger
+from components.utils.misc import ensure_list
 from functools import wraps
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 
 try:
@@ -19,6 +25,30 @@ except Exception:
     msgpack = None
 
 JSON = Dict[str, Any]
+
+# Constants
+DEFAULT_CACHE_SIZE = 2048
+DEFAULT_PAGE_SIZE = 50
+MAX_COMPRESSED_PAYLOAD_SIZE = 32 * 1024 * 1024  # 32 MB
+MAX_RAW_PAYLOAD_SIZE = 128 * 1024 * 1024  # 128 MB
+SYNC_PAYLOAD_FORMAT_VERSION = 2
+
+# Table field mappings for list_rows projection
+_DEFAULT_LIST_ROW_FIELDS = ["id", "created", "updated", "doc_version"]
+LIST_ROW_FIELDS = {
+    "users": _DEFAULT_LIST_ROW_FIELDS + ["login"],
+    "projects": _DEFAULT_LIST_ROW_FIELDS + ["name", "assigned_users"],
+    "cars": _DEFAULT_LIST_ROW_FIELDS + ["vin", "assigned_users", "assigned_project"],
+    "processings": _DEFAULT_LIST_ROW_FIELDS + ["assigned_user"],
+}
+
+# Index definitions for each table
+INDEX_FIELDS = {
+    "cars": ["id", "vin", "assigned_users", "assigned_project"],
+    "projects": ["id", "name", "assigned_users"],
+    "users": ["id", "login", "credentials.id", "acl"],
+    "processings": ["id", "assigned_user"],
+}
 
 _changed_ctx = contextvars.ContextVar("_changed_ctx", default={})
 _deleted_ctx = contextvars.ContextVar("_deleted_ctx", default={})
@@ -34,79 +64,35 @@ def _reset_context_vars():
 
 
 class StorageCodec:
+    """Codec for serializing/deserializing database documents."""
+
+    SUPPORTED_CODECS = {"json", "msgpack"}
+
     def __init__(self, kind: str = "msgpack"):
         kind = (kind or "msgpack").lower()
-        if kind not in {"json", "msgpack"}:
-            raise ValueError("codec must be 'json' or 'msgpack'")
+        if kind not in self.SUPPORTED_CODECS:
+            raise ValueError(f"codec must be one of {self.SUPPORTED_CODECS}")
         if kind == "msgpack" and msgpack is None:
             raise RuntimeError(
-                "MessagePack codec requested but 'msgpack' is not installed. pip install msgpack"
+                "MessagePack codec requested but 'msgpack' is not installed."
             )
         self.kind = kind
 
     def dumps(self, obj: dict) -> bytes:
+        """Serialize an object to bytes."""
         if self.kind == "msgpack":
             return msgpack.dumps(obj, use_bin_type=True)
         elif self.kind == "json":
             return json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        raise ValueError(f"Unknown codec: {self.kind}")
 
     def loads(self, data: bytes) -> dict:
+        """Deserialize bytes to an object."""
         if self.kind == "msgpack":
             return msgpack.loads(data, raw=False)
         elif self.kind == "json":
             return json.loads(data.decode("utf-8"))
-
-
-def _get_all(doc: Any, path: str) -> List[Any]:
-    parts = path.split(".")
-
-    def walk(cur, idx):
-        if idx == len(parts):
-            if isinstance(cur, list):
-                return [it for it in cur]
-            return [cur]
-
-        key = parts[idx]
-        if isinstance(cur, dict):
-            if key in cur:
-                return walk(cur[key], idx + 1)
-            return []
-
-        if isinstance(cur, list):
-            out = []
-            for it in cur:
-                out.extend(walk(it, idx))
-            return out
-
-        return []
-
-    return walk(doc, 0)
-
-
-def _get_first(doc: Any, path: str, default=None):
-    vals = _get_all(doc, path)
-    return vals[0] if vals else default
-
-
-def _deep_merge(dst: Any, src: Any) -> Any:
-    if isinstance(dst, dict) and isinstance(src, dict):
-        out = dict()
-        for k in set(dst.keys()) | set(src.keys()):
-            if k in src:
-                if k in dst:
-                    out[k] = _deep_merge(dst[k], src[k])
-                else:
-                    out[k] = src[k]
-            else:
-                v = dst[k]
-                if isinstance(v, dict):
-                    out[k] = dict(v)
-                elif isinstance(v, list):
-                    out[k] = list(v)
-                else:
-                    out[k] = v
-        return out
-    return src
+        raise ValueError(f"Unknown codec: {self.kind}")
 
 
 def _requires_cluster(func):
@@ -122,7 +108,7 @@ def _requires_cluster(func):
 
 
 class _LRU:
-    def __init__(self, max_entries: int = 2048):
+    def __init__(self, max_entries: int = DEFAULT_CACHE_SIZE):
         self.max = max_entries
         self.od: "OrderedDict[tuple[str,str], JSON]" = OrderedDict()
 
@@ -158,7 +144,7 @@ class Database:
         self._manifest: JSON = {}
         self._peer_manifests: Dict[str, JSON] = {}
         self._indexes: Dict[str, Dict[str, Dict[Any, Set[str]]]] = {}
-        self._cache = _LRU(max_entries=2048)
+        self._cache = _LRU(max_entries=DEFAULT_CACHE_SIZE)
         self._locks: Dict[Tuple[str, str], asyncio.Lock] = {}
         self._codec = StorageCodec(codec)
         if self.main_path.exists():
@@ -181,7 +167,8 @@ class Database:
         if value is not None:
             self._cluster_ready.set()
 
-    def _validate_id(self, id_: str):
+    def _validate_id(self, id_: str) -> None:
+        """Validate that a document ID is safe and well-formed."""
         if not id_:
             raise ValueError("id must be non‑empty")
         if not isinstance(id_, str):
@@ -190,6 +177,7 @@ class Database:
             raise ValueError(f"Invalid document id {id_!r}")
 
     def _resolve_doc_path(self, table: str, id_: str) -> Path:
+        """Resolve and validate the file path for a document."""
         self._validate_id(id_)
         tdir = (self.base / table).resolve()
         p = (self.base / table / id_).resolve()
@@ -198,19 +186,25 @@ class Database:
         return p
 
     def _lock_for(self, table: str, id_: str) -> asyncio.Lock:
+        """Get or create a lock for a specific document."""
         key = (table, id_)
         if key not in self._locks:
             self._locks[key] = asyncio.Lock()
         return self._locks[key]
 
-    async def do_rollback(self, cluster_peers: list = []):
+    async def do_rollback(self, cluster_peers: list = []) -> None:
+        """Rollback changes to previously saved snapshots."""
         try:
             snapshots = _snapshots_ctx.get()
             if not snapshots:
                 logger.debug("Nothing to rollback")
                 return
+
+            # Restore local snapshots
             for table in snapshots:
                 await self.apply_snapshot(table, snapshots[table])
+
+            # Propagate rollback to peers if needed
             if cluster_peers:
                 comp_sync = await self.make_sync_from_docs(snapshots)
                 _, comp_b64 = comp_sync.split(" ", 1)
@@ -222,44 +216,58 @@ class Database:
             logger.critical(e)
             logger.error("Rollback failed")
 
+    async def _build_all_indexes(self) -> None:
+        """Build all indexes defined in INDEX_FIELDS constant."""
+        for table, fields in INDEX_FIELDS.items():
+            await self.build_index(table, fields)
+
     async def __aenter__(self):
         _reset_context_vars()
+        await self._build_all_indexes()
         return self
 
-    async def __aexit__(self, exc_type, exc, tb):
-        sync_str = await self.sync_out()
-        if sync_str and not exc:
-            try:
-                _, b64 = sync_str.split(" ", 1)
-                ok_peers = []
-                failed = False
+    async def _replicate_to_peers(self, sync_str: str) -> None:
+        """Replicate changes to cluster peers, rolling back on failure."""
+        try:
+            _, b64 = sync_str.split(" ", 1)
+            ok_peers = []
+            failed = False
 
-                for peer in self.cluster.peers.get_established():
-                    result, _ = await self.cluster.send_command(
-                        f"DBSYNC {b64}", peer, raise_err=False
-                    )
-                    if result:
-                        ok_peers.append(peer)
-                    else:
-                        failed = True
+            for peer in self.cluster.peers.get_established():
+                result, _ = await self.cluster.send_command(
+                    f"DBSYNC {b64}", peer, raise_err=False
+                )
+                if result:
+                    ok_peers.append(peer)
+                else:
+                    failed = True
 
-                if failed:
-                    await asyncio.shield(self.do_rollback(ok_peers))
-                    logger.error(
-                        "Replication failed on at least one peer; rolled back everywhere."
-                    )
-            except Exception as e:
-                logger.critical(e)
+            if failed:
+                await asyncio.shield(self.do_rollback(ok_peers))
+                logger.error(
+                    "Replication failed on at least one peer; rolled back everywhere."
+                )
+        except Exception as e:
+            logger.critical(e)
 
-        elif exc:
-            logger.error(f"Rolling back local changes due to error: {exc}.")
-            await asyncio.shield(self.do_rollback())
-
+    async def _cleanup_locks_and_save(self) -> None:
+        """Release cluster locks and save manifest."""
         async with self._lock_for("aexit", "1"):
             locks = _locks_ctx.get()
             for doc_id, lock_id in locks.items():
                 await asyncio.shield(self.cluster.release(lock_id, [doc_id]))
             self.main_path.write_text(json.dumps(self._manifest, indent=2))
+
+    async def __aexit__(self, exc_type, exc, tb):
+        sync_str = await self.sync_out()
+
+        if sync_str and not exc:
+            await self._replicate_to_peers(sync_str)
+        elif exc:
+            logger.error(f"Rolling back local changes due to error: {exc}.")
+            await asyncio.shield(self.do_rollback())
+
+        await self._cleanup_locks_and_save()
 
     def _changed_dict(self) -> dict:
         return _changed_ctx.get()
@@ -279,7 +287,7 @@ class Database:
     def doc_version(self, table: str, id_: str) -> int:
         return int(self._tbl(table)["doc_versions"].get(id_, 0))
 
-    async def ids(self, table: str) -> List[str]:
+    def ids(self, table: str) -> List[str]:
         tdir = self.base / table
         if not tdir.exists():
             return []
@@ -380,25 +388,37 @@ class Database:
     def _update_indexes_for_doc_change(
         self, table: str, *, id_: str, old_doc: Optional[JSON], new_doc: Optional[JSON]
     ) -> None:
+        """Update indexes when a document changes."""
         if table not in self._indexes:
             return
+
         for f, mapping in self._indexes[table].items():
+            # Remove old document values from index
             if old_doc is not None:
-                for v in _get_all(old_doc, f):
+                for v in get_all(old_doc, f):
                     try:
                         s = mapping.get(v)
                     except TypeError:
-                        logger.warning(f"Type Error for {v}")
+                        logger.warning(
+                            f"Cannot index unhashable value of type {type(v).__name__} "
+                            f"for field '{f}' in table '{table}'"
+                        )
                         continue
                     if s:
                         s.discard(id_)
                         if not s:
                             mapping.pop(v, None)
+
+            # Add new document values to index
             if new_doc is not None:
-                for v in _get_all(new_doc, f):
+                for v in get_all(new_doc, f):
                     try:
                         bucket = mapping.setdefault(v, set())
                     except TypeError:
+                        logger.warning(
+                            f"Cannot index unhashable value of type {type(v).__name__} "
+                            f"for field '{f}' in table '{table}'"
+                        )
                         continue
                     bucket.add(id_)
 
@@ -417,7 +437,7 @@ class Database:
             to_write = (
                 doc
                 if replace
-                else (_deep_merge(old_doc, doc) if old_doc is not None else doc)
+                else (merge_dict(old_doc, doc) if old_doc is not None else doc)
             )
 
             tdir = self.base / table
@@ -488,20 +508,29 @@ class Database:
             self._locks.pop((table, id_), None)
 
     async def build_index(self, table: str, fields: List[str]) -> None:
+        """Build indexes for specified fields in a table."""
         idxs = self._indexes.setdefault(table, {})
+
+        # Initialize index structures
         for f in fields:
             idxs[f] = {}
-        for id_ in await self.ids(table):
+
+        # Populate indexes with existing documents
+        for id_ in self.ids(table):
             doc = await self.get(table, id_)
             if not doc:
                 continue
+
             for f in fields:
-                for v in _get_all(doc, f):
+                for v in get_all(doc, f):
                     try:
                         bucket = idxs[f].setdefault(v, set())
+                        bucket.add(id_)
                     except TypeError:
-                        continue
-                    bucket.add(id_)
+                        logger.warning(
+                            f"Cannot index unhashable value of type {type(v).__name__} "
+                            f"for field '{f}' in table '{table}'"
+                        )
 
     async def search(
         self,
@@ -509,15 +538,26 @@ class Database:
         where: Optional[Dict[str, Any]] = None,
         limit: Optional[int] = None,
     ) -> List[JSON]:
+        """Search for documents matching a where clause.
+
+        Uses indexes when available, auto-creates indexes for unindexed fields.
+        Returns full documents (unlike list_rows which returns projections).
+
+        Args:
+            table: Table name
+            where: Filter clause (AND across fields, OR within field for lists)
+            limit: Maximum number of results to return
+        """
         where = where or {}
-        results: Set[str] = set()
         idxs = self._indexes.get(table, {})
         candidate_ids: Optional[Set[str]] = None
-        out: List[JSON] = []
+        unindexed_fields = []
 
+        # Use indexes to narrow down candidates
         for f, val in where.items():
             values = ensure_list(val)
             if f in idxs:
+                # Use existing index
                 field_results = set()
                 for v in values:
                     field_results |= idxs[f].get(v, set())
@@ -526,29 +566,36 @@ class Database:
                 else:
                     candidate_ids &= field_results
             else:
-                logger.warning(
-                    f"Search on unindexed field '{f}' in table '{table}' may be slow"
-                )
-        if candidate_ids is None:
-            candidate_ids = set(await self.ids(table))
+                # Track unindexed fields for auto-indexing
+                unindexed_fields.append(f)
 
+        # Auto-create indexes for unindexed fields
+        if unindexed_fields:
+            logger.info(
+                f"Auto-creating indexes for fields {unindexed_fields} in table '{table}'"
+            )
+            await self.build_index(table, unindexed_fields)
+
+        # If no indexes were used, search all documents
+        if candidate_ids is None:
+            candidate_ids = set(self.ids(table))
+
+        # Filter candidates using the where clause
+        results: Set[str] = set()
         for id_ in candidate_ids:
             doc = await self.get(table, id_)
             if not doc:
                 continue
-            ok = True
-            for f, val in where.items():
-                values = ensure_list(val)
-                dvals = _get_all(doc, f)
-                if not any(v in dvals for v in values):
-                    ok = False
-                    break
-            if ok:
+            if match_clause(doc, where):
                 results.add(id_)
 
+        # Sort and limit results
         ordered = sorted(results)
         if limit is not None:
             ordered = ordered[:limit]
+
+        # Fetch final documents
+        out: List[JSON] = []
         for id_ in ordered:
             doc = await self.get(table, id_)
             if doc:
@@ -560,7 +607,7 @@ class Database:
         table: str,
         *,
         page: int = 1,
-        page_size: int = 50,  # -1 => return all rows
+        page_size: int = DEFAULT_PAGE_SIZE,  # -1 => return all rows
         sort_attr: str | int = "id",  # -1 => no sort
         sort_reverse: bool = False,
         where: dict | None = None,
@@ -577,7 +624,8 @@ class Database:
           - Filtering happens on the *row projection* (first value at each path).
         """
 
-        ids = await self.ids(table)
+        # Load and project rows
+        ids = self.ids(table)
         rows = []
         for id_ in ids:
             doc = await self.get(table, id_)
@@ -587,139 +635,60 @@ class Database:
                 {
                     k: v
                     for k, v in doc.items()
-                    if k in mappings.LIST_ROW_FIELDS.get(table, _default_list_row)
+                    if k in LIST_ROW_FIELDS.get(table, _DEFAULT_LIST_ROW_FIELDS)
                 }
             )
 
-        def _match_clause(row: dict, clause: dict) -> bool:
-            for k, v in (clause or {}).items():
-                rv = row.get(k, None)
-                options = ensure_list(v)
-                if isinstance(rv, list):
-                    if not any(opt in rv for opt in options):
-                        return False
-                else:
-                    if not any(rv == opt for opt in options):
-                        return False
-            return True
+        # Apply filters
+        rows = filter_rows(rows, where, any_of, q)
 
-        def _filter_rows(rows_in: list[dict]) -> list[dict]:
-            if where is None and any_of is None and not q:
-                return rows_in
-            out = []
-            for r in rows_in:
-                ok = True
-                if where:
-                    ok = _match_clause(r, where)
-                if ok and any_of:
-                    for c in any_of:
-                        if where:
-                            for conflict in where.keys() & c.keys():
-                                c.pop(conflict, None)
-                                logger.warning(
-                                    f"Overlapping key {conflict!r} in 'where' and 'any_of' clause. "
-                                    + "Key will be removed from 'any_of' clause"
-                                )
-                        if _match_clause(r, c):
-                            break
-                    else:
-                        ok = False
-                if ok and q:
-                    needle = q.lower()
-                    ok = any(
-                        (isinstance(v, str) and needle in v.lower())
-                        or (
-                            not isinstance(v, (dict, list)) and needle in str(v).lower()
-                        )
-                        for v in r.values()
-                    )
-                if ok:
-                    out.append(r)
-            return out
-
-        rows = _filter_rows(rows)
-
+        # Apply sorting
         if sort_attr != -1:
+            rows.sort(
+                key=create_sort_key(sort_attr, sort_reverse), reverse=sort_reverse
+            )
 
-            def _type_rank(v):
-                if v is None:
-                    return 5
-                if isinstance(v, bool):
-                    return 2
-                if isinstance(v, (int, float)):
-                    return 0
-                if isinstance(v, str):
-                    return 1
-                return 3
+        # Apply pagination
+        return paginate_rows(rows, page, page_size, sort_attr, sort_reverse)
 
-            def _norm(v):
-                if v is None:
-                    return ""
-                if isinstance(v, str):
-                    return v.lower()
-                return v
-
-            def _key(row):
-                v = row.get(sort_attr, None)
-                missing = v is None
-                missing_key = 1 if missing else 0
-                if sort_reverse:
-                    missing_key = 1 - missing_key
-                return (missing_key, _type_rank(v), _norm(v))
-
-            rows.sort(key=_key, reverse=sort_reverse)
-
-        total = len(rows)
-        if page_size == -1:
-            items = rows
-            total_pages = 1
-            page = 1
-        else:
-            if page_size < 1:
-                page_size = 1
-            total_pages = max(1, (total + page_size - 1) // page_size)
-            if page < 1:
-                page = 1
-            if page > total_pages:
-                page = total_pages
-            start = (page - 1) * page_size
-            end = start + page_size
-            items = rows[start:end]
-
-        return {
-            "items": items,
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-            "sort_attr": sort_attr,
-            "sort_reverse": sort_reverse,
-            "total_pages": total_pages,
-            "has_prev": (page > 1) and (page_size != -1),
-            "has_next": (page < total_pages) and (page_size != -1),
-        }
-
-    async def sync_out(self) -> Optional[str]:
+    def _has_pending_changes(self) -> bool:
+        """Check if there are any pending changes or deletions."""
         changed = self._changed_dict()
         deleted = self._deleted_dict()
         has_changes = any(len(s) > 0 for s in changed.values())
         has_deletes = any(len(s) > 0 for s in deleted.values())
-        if not (has_changes or has_deletes):
+        return has_changes or has_deletes
+
+    def _encode_sync_payload(self, payload: Dict[str, Any]) -> str:
+        """Encode a sync payload to compressed base64 string."""
+        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        b64 = base64.b64encode(zlib.compress(raw)).decode("ascii")
+        return "DBSYNC LAZY " + b64
+
+    async def sync_out(self) -> Optional[str]:
+        if not self._has_pending_changes():
             return None
 
+        changed = self._changed_dict()
+        deleted = self._deleted_dict()
         changed_tables = set(changed.keys()) | set(deleted.keys())
 
         payload: Dict[str, Any] = {
-            "format": 2,
+            "format": SYNC_PAYLOAD_FORMAT_VERSION,
             "tables": {},
         }
+
         for table in changed_tables:
             changed_ids = changed.get(table, set())
             deleted_ids = deleted.get(table, set())
+
+            # Collect changed documents
             docs: Dict[str, Any] = {}
             for id_ in changed_ids:
                 doc = await self.get(table, id_)
                 if doc is not None:
                     docs[id_] = doc
+
             payload["tables"][table] = {
                 "docs": docs,
                 "deleted_ids": sorted(list(deleted_ids)),
@@ -728,42 +697,52 @@ class Database:
                     for id_ in (changed_ids | deleted_ids)
                 },
             }
-        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        b64 = base64.b64encode(zlib.compress(raw)).decode("ascii")
-        return "DBSYNC LAZY " + b64
 
-    async def sync_in(
-        self,
-        data_b64: str,
-    ) -> Dict[str, Any]:
+        return self._encode_sync_payload(payload)
+
+    def _decode_sync_payload(self, data_b64: str) -> Dict[str, Any]:
+        """Decode and validate a sync payload."""
+        # Strip DBSYNC prefix if present
         if data_b64.startswith("DBSYNC LAZY "):
-            data_b64 = data_b64[5:]
+            data_b64 = data_b64[len("DBSYNC LAZY ") :]
 
         if not isinstance(data_b64, str):
             raise TypeError("sync_in expects a base64 string (without 'SYNC ' prefix)")
 
         try:
             zipped = base64.b64decode(data_b64.encode("ascii"))
-            if len(zipped) > 32 * 1024 * 1024:
+            if len(zipped) > MAX_COMPRESSED_PAYLOAD_SIZE:
                 raise ValueError("Compressed sync payload too large")
+
+            # Decompress with size limit
             try:
-                raw = zlib.decompress(zipped, max_length=128 * 1024 * 1024)
+                raw = zlib.decompress(zipped, max_length=MAX_RAW_PAYLOAD_SIZE)
             except TypeError:
                 raw = zlib.decompress(zipped)
-                if len(raw) > 128 * 1024 * 1024:
+                if len(raw) > MAX_RAW_PAYLOAD_SIZE:
                     raise ValueError("raw payload too large")
+
             payload = json.loads(raw.decode("utf-8"))
         except Exception as e:
             raise ValueError(f"Invalid sync payload: {e!s}")
 
-        if int(payload.get("format", 0)) != 2:
+        if int(payload.get("format", 0)) != SYNC_PAYLOAD_FORMAT_VERSION:
             raise ValueError("Unsupported sync payload format")
+
+        return payload
+
+    async def sync_in(
+        self,
+        data_b64: str,
+    ) -> Dict[str, Any]:
+        payload = self._decode_sync_payload(data_b64)
 
         applied_upserts = 0
         applied_deletes = 0
         conflicts: List[Tuple[str, str, str]] = []
 
         for table, entry in payload.get("tables", {}).items():
+            # Process deletions
             for id_ in entry.get("deleted_ids", []):
                 try:
                     await self._delete_local(table, id_)
@@ -771,16 +750,10 @@ class Database:
                 except Exception as e:
                     conflicts.append((table, id_, f"delete: {e!s}"))
 
+            # Process upserts
             for id_, doc in entry.get("docs", {}).items():
-                incoming_version = entry.get("doc_versions", {}).get(id_)
                 try:
-                    await self._upsert_local(
-                        table,
-                        id_,
-                        doc,
-                        replace=True,
-                        # incoming_version=incoming_version, # set to sync_in provided ver
-                    )
+                    await self._upsert_local(table, id_, doc, replace=True)
                     applied_upserts += 1
                 except Exception as e:
                     conflicts.append((table, id_, f"upsert: {e!s}"))
@@ -817,12 +790,14 @@ class Database:
         self, tables_docs: Dict[str, Dict[str, Optional[JSON]]]
     ) -> str:
         payload = {
-            "format": 2,
+            "format": SYNC_PAYLOAD_FORMAT_VERSION,
             "tables": {},
         }
+
         for table, idmap in tables_docs.items():
             docs = {}
             deleted = []
+
             for id_, doc in idmap.items():
                 if doc is None:
                     deleted.append(id_)
@@ -830,6 +805,7 @@ class Database:
                     dd = dict(doc)
                     dd.setdefault("id", id_)
                     docs[id_] = dd
+
             payload["tables"][table] = {
                 "docs": docs,
                 "deleted_ids": sorted(deleted),
@@ -838,9 +814,8 @@ class Database:
                     for id_ in set(list(docs.keys()) + deleted)
                 },
             }
-        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        b64 = base64.b64encode(zlib.compress(raw)).decode("ascii")
-        return "DBSYNC LAZY " + b64
+
+        return self._encode_sync_payload(payload)
 
     @_requires_cluster
     async def _do_ops(

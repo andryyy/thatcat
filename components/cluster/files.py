@@ -5,7 +5,8 @@ import zlib
 
 from .exceptions import *
 from components.logs import logger
-from components.utils import is_path_within_cwd, apply_meta
+from components.utils.misc import is_path_within_cwd
+from components.utils.files import apply_meta
 
 
 class Files:

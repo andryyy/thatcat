@@ -39,9 +39,7 @@ DATA FIELDS
       <div id="leaflet-{{ form_id }}" _="install selectFromLeaflet(
         formId: '{{ form_id }}',
         options: {
-          coords: { lat: {{ current_data[k].lat }}, lon: {{ current_data[k].lon }}, display_name: '{{ current_data[k].display_name }}', zoom: 15 },
-          frozen: true
-      })">
+          coords: { lat: {{ current_data[k].lat }}, lon: {{ current_data[k].lon }}, display_name: '{{ current_data[k].display_name }}', zoom: 15 }})">
       <div>
           {{ current_data[k].display_name }}
           <br>
@@ -330,7 +328,6 @@ DATA FIELDS
 
   {% elif v.type == "project" %}
     <fieldset data-loading-disable data-field-type="project">
-    {% set permitted_projects = request.form_options.projects.values() | selectattr("permitted", "eq", True) | list %}
     <label for="{{ form_id }}">{{ L[v.title] }}</label>
     <select {{ v.input_extra|safe }}
       name="{{ field_name }}"

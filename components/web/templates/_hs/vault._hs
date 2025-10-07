@@ -53,7 +53,8 @@ behavior vaultToggle
     get #vault-unlock
       set its textContent to '{{ L["Lock"] }}'
       remove @disabled from it
-    set #vault-indicator's textContent to '{{ L["Unlocked"] }}'
+    set #vault-dialog-toggle's @class to 'color-green shine'
+    set #vault-dialog-toggle's textContent to '{{ L["Vault"] }} 🔓'
   end
 
   def setLocked
@@ -62,7 +63,8 @@ behavior vaultToggle
     get #vault-unlock
       set its textContent to '{{ L["Unlock"] }}'
       remove @disabled from it
-    set #vault-indicator's textContent to '{{ L["Locked"] }}'
+    set #vault-dialog-toggle's @class to 'color-pink shine'
+    set #vault-dialog-toggle's textContent to '{{ L["Vault"] }} 🔒'
   end
 
   def novault
@@ -71,14 +73,15 @@ behavior vaultToggle
     get #vault-unlock
       add @disabled to it
       set its textContent to '{{ L["Not available"] }}'
-    set #vault-indicator's textContent to '{{ L["Not available"] }} ⛔'
+    set #vault-dialog-toggle's @class to 'color-zinc-650 shine'
+    set #vault-dialog-toggle's textContent to '{{ L["Vault not available"] }}'
   end
 
   init
     if window.vault.isUnlocked()
       call setUnlocked()
     else
-      if #vault-unlock's @data-vault != "{}"
+      if #vault-unlock's @data-vault != "" and @data-vault != "{}"
         call setLocked()
       else
         call novault()
@@ -87,9 +90,15 @@ behavior vaultToggle
   end
 
   on profileUpdate from body
-    if event.detail.vault
+  log event.detail.vault
+  log event.detail.vault
+  log event.detail.vault
+    if event.detail.vault and #vault-unlock's @data-vault != event.detail.vault
       set #vault-unlock's @data-vault to event.detail.vault
-      if event.detail.vault != "{}" call setLocked() end
+      if event.detail.vault != "{}" and event.detail.vault != ""
+        call window.vault.lock()
+        call setLocked()
+      end
     end
   end
 

@@ -1,10 +1,10 @@
 from .notifications import trigger_notification
-from .quart import abort, redirect, request, session, url_for, websocket
+from quart import abort, redirect, request, session, url_for, websocket
 from components.database import db
 from components.database.states import STATE
 from components.logs import logger
 from components.models import *
-from components.utils import ensure_list, unique_list
+from components.utils.misc import ensure_list, unique_list
 from config import defaults
 from functools import wraps
 

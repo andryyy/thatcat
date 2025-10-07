@@ -85,19 +85,16 @@
   </ul>
 </nav>
 
-<details name="quick-control">
+<details name="quick-control" open>
   <summary>{{ L["Quick settings"] }}</summary>
   {% if session["login"] %}
-  <div hx-target="#body-main" class="grid-space-between">
-    <button
-    id="vault-dialog-toggle"
-    _="on click
-      halt the event
-      add @open to #vault-dialog
-      call #vault-unlock-pin.focus()
-    end">
-      🔒 <span id="vault-indicator"></span>
-    </button>
+  <div class="grid-space-between">
+    <div>
+      <a href="" class="shine"
+        id="vault-dialog-toggle"
+        _="on click halt the event add @open to #vault-dialog call #vault-unlock-pin.focus() end">
+      </a>
+    </div>
     <div>
     {% for role in session.get("acl", []) %}
       <mark>{{ role }}</mark>

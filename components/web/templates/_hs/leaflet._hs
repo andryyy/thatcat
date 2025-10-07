@@ -6,10 +6,8 @@ behavior selectFromLeaflet(formId, options)
       call drawMap(0.0, 0.0, 1)
     else
       call drawMap(options.coords.lat, options.coords.lon, options.coords.zoom or 12)
-      call setPos(options.coords.lat, options.coords.lon, options.coords.display_name, true)
-      put options.coords.display_name into #{'leaflet-marker-name-' + formId}
+      trigger freeze
     end
-    add @disabled to #{'leaflet-search-query-' + formId} unless not options.frozen
     trigger afterDraw on #{'leaflet-current-position-' + formId}
     call fitToMarkers()
     hide #{'leaflet-loading-' + formId}
@@ -26,13 +24,25 @@ behavior selectFromLeaflet(formId, options)
   on unfreeze
     set options.frozen to false
     remove @disabled from #{'leaflet-search-query-' + formId}
+    call :map.dragging.enable()
+    call :map.touchZoom.enable()
+    call :map.doubleClickZoom.enable()
+    call :map.scrollWheelZoom.enable()
+    call :map.boxZoom.enable()
+    call :map.keyboard.enable()
   end
 
   on freeze
-    add @disabled to #{'leaflet-search-query-' + formId}
     call setPos(options.coords.lat, options.coords.lon, options.coords.display_name, true)
-    put options.coords.display_name into #{'leaflet-marker-name-' + formId}
     set options.frozen to true
+    add @disabled to #{'leaflet-search-query-' + formId}
+    put options.coords.display_name into #{'leaflet-marker-name-' + formId}
+    call :map.dragging.disable()
+    call :map.touchZoom.disable()
+    call :map.doubleClickZoom.disable()
+    call :map.scrollWheelZoom.disable()
+    call :map.boxZoom.disable()
+    call :map.keyboard.disable()
   end
 
   on keydown[keyCode == 13] from #{'leaflet-search-query-' + formId} throttled at 1s
@@ -98,21 +108,20 @@ behavior selectFromLeaflet(formId, options)
   end
 
   def setPos(lat, lon, name, flyTo)
+    if options.frozen exit end
     set name to '' unless name
     set flyTo to false unless flyTo
     if :selectionMarker
-      call :selectionMarker.setLatLng([lat, lon]) unless options.frozen
+      call :selectionMarker.setLatLng([lat, lon])
     else
       call L.marker([lat, lon], {bubblingMouseEvents: false, markerName: name}).addTo(:map).on('click', handleClick)
         set :selectionMarker to result
     end
     call :map.flyTo([lat, lon], 12) unless not flyTo
-    if not options.frozen
-      put name into #{'leaflet-marker-name-' + formId}
-      set value of #{'leaflet-lat-' + formId} to lat
-      set value of #{'leaflet-lon-' + formId} to lon
-      set value of #{'leaflet-display-name-' + formId} to name
-    end
+    put name into #{'leaflet-marker-name-' + formId}
+    set value of #{'leaflet-lat-' + formId} to lat
+    set value of #{'leaflet-lon-' + formId} to lon
+    set value of #{'leaflet-display-name-' + formId} to name
   end
 
   def handleMouse(e)

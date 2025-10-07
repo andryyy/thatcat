@@ -2,12 +2,12 @@ import json
 import random
 
 from components.models.helpers import *
-from components.utils import ensure_list, ntime_utc_now, unique_list, utc_now_as_str
+from components.utils.datetimes import ntime_utc_now, utc_now_as_str
+from components.utils.misc import ensure_list, unique_list
 from config.defaults import ACCEPT_LANGUAGES
 from dataclasses import asdict, dataclass, field, fields
 from functools import cached_property
 
-USER_FILTERABLES = ["list:acl", "list:groups"]
 USER_ACLS = ["user", "system"]
 
 
