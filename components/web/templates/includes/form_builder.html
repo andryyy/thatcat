@@ -138,7 +138,7 @@ DATA FIELDS
 
     <fieldset data-loading-disable>
       <label for="{{ form_id }}">{{ L[v.title] }}</label>
-      <textarea {{ v.input_extra|safe }} id="{{ form_id }}" rows="10" name="{{ field_name }}">
+      <textarea {% if v.vault == 'true' %}_="install vaultField"{% endif %} {{ v.input_extra|safe }} id="{{ form_id }}" rows="10" name="{{ field_name }}">
         {%- if current_data[k] == None %}{{ v.default or '' }}{% else %}{{ current_data[k] }}{% endif -%}
       </textarea>
       {% if v.description %}

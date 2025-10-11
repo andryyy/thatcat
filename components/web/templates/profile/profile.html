@@ -23,6 +23,11 @@
   hx-target="#profile-form"
   hx-swap="outerHTML">
     <h6>{{ L["Profile"] }}</h6>
+    <section>
+    {% for role in session.get("acl", []) %}
+      <mark>{{ role }}</mark>
+    {% endfor %}
+    </section>
     <form
       _="on htmx:afterRequest[event.detail.successful==true] from me trigger reloadProfile on #profile-container"
       id="profile-form"

@@ -47,11 +47,23 @@
     <footer>
     {% block footer %}
       {% if session["login"] %}
-      <div hx-ext="ws" ws-connect="/ws">
-        <input ws-send
-          type="hidden"
-          hx-vals='js:{"path": (event.detail.requestConfig?event.detail.requestConfig.path:location.pathname)}'
-          hx-trigger="htmx:beforeRequest from:body, htmx:wsAfterMessage from:body" />
+      <div id="ws-connect" hx-ext="ws" ws-connect="/ws" _="
+        on load 1
+          repeat forever
+            trigger wsSendPath on body
+            wait 3s
+          end
+        end
+        on htmx:beforeRequest from body
+          set value of #ws-path to event.detail.requestConfig.path
+          trigger wsSendPath on body
+        end
+        on htmx:afterRequest from body
+          set value of #ws-path to location.pathname
+          trigger wsSendPath on body
+        end
+      ">
+        <input ws-send name="path" value="{{ request.path }}" id="ws-path" hx-trigger="wsSendPath from:body" type="hidden" />
         <div id="ws-recv"></div>
       </div>
       {% endif %}

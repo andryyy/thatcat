@@ -63,6 +63,8 @@ class Watchdog:
             except (
                 AssertionError,
                 ConnectionResetError,
+                BrokenPipeError,
+                ConnectionAbortedError,
                 asyncio.exceptions.IncompleteReadError,
             ):
                 logger.error(f"{name} failed")

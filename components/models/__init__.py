@@ -41,6 +41,7 @@ model_forms = {
             "radius": {"title": "Location Radius", "type": "number"},
             "notes": {
                 "title": "Notes",
+                "vault": "true",
                 "description": "Additional information; free text",
                 "type": "textarea",
                 "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
@@ -86,6 +87,7 @@ model_forms = {
             "location": {"title": "Location", "type": "location"},
             "notes": {
                 "title": "Notes",
+                "vault": "true",
                 "description": "Additional information; free text",
                 "type": "textarea",
                 "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',

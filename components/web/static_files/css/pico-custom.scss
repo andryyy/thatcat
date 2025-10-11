@@ -15,6 +15,7 @@
 @use "sass:map";
 @use "settings" as *;
 @use "sass:math";
+@use "sass:color";
 
 @font-face {
     font-family: go;
@@ -97,11 +98,18 @@
   --pico-line-height: 1.4;
 }
 
-$sm-breakpoint: map-get(map-get($breakpoints, sm), breakpoint);
-$md-breakpoint: map-get(map-get($breakpoints, md), breakpoint);
-$lg-breakpoint: map-get(map-get($breakpoints, lg), breakpoint);
-$xl-breakpoint: map-get(map-get($breakpoints, xl), breakpoint);
-$xxl-breakpoint: map-get(map-get($breakpoints, xxl), breakpoint);
+$sm-breakpoint: map.get(map.get($breakpoints, sm), breakpoint);
+$md-breakpoint: map.get(map.get($breakpoints, md), breakpoint);
+$lg-breakpoint: map.get(map.get($breakpoints, lg), breakpoint);
+$xl-breakpoint: map.get(map.get($breakpoints, xl), breakpoint);
+$xxl-breakpoint: map.get(map.get($breakpoints, xxl), breakpoint);
+
+.encrypted-field {
+  font-family: monospace;
+  border-color: #{$pink};
+  user-select: none;
+  -webkit-text-security: disc;
+}
 
 .shine {
     text-decoration: none !important;
@@ -118,6 +126,7 @@ $xxl-breakpoint: map-get(map-get($breakpoints, xxl), breakpoint);
     -webkit-text-fill-color: transparent;
 }
 
+.small,
 small {
   font-size: .875rem;
   color: var(--pico-muted-color);
@@ -142,9 +151,9 @@ nav[aria-label="breadcrumb"] span {
   margin-inline-start: calc(var(--pico-nav-link-spacing-horizontal) * -1);
 }
 
-#nav-theme-bulb {
+#nav-theme {
   cursor:pointer !important;
-  text-decoration: none;
+  text-decoration: underline;
 }
 
 .leaflet-marker-icon {
@@ -174,8 +183,15 @@ nav[aria-label="breadcrumb"] span {
 .hidden {
   display: none;
 }
-.dark {
-  filter: grayscale(100%);
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-10px); }
+  20%, 40%, 60%, 80% { transform: translateX(10px); }
+}
+
+.shake {
+  animation: shake 200ms ease-in-out;
 }
 
 table td article {
@@ -338,8 +354,9 @@ button[type="submit"] {
   width: auto;
 }
 
-dialog article {
-  max-width: 65%;
+dialog article,
+dialog div {
+  max-width: 55%;
 }
 
 .no-text-wrap {
@@ -454,13 +471,14 @@ hgroup ol, hgroup ul {
   :root {
     --pico-font-size: 12pt;
   }
+  dialog article,
+  dialog div {
+    max-width: 85%;
+  }
   #notification-container {
     left: 0;
     bottom: 0;
     width: 100%;
-  }
-  dialog article {
-    max-width: 95%;
   }
   .grid-auto-cols {
     display: grid;
@@ -497,9 +515,9 @@ fieldset.system-field label:before {
 ///////////////////////////////////////
 
 @function get-luminance($color) {
-  $red: math.div(red($color), 255);
-  $green: math.div(green($color), 255);
-  $blue: math.div(blue($color), 255);
+  $red: math.div(color.channel($color, "red", $space: rgb), 255);
+  $green: math.div(color.channel($color, "green", $space: rgb), 255);
+  $blue: math.div(color.channel($color, "blue", $space: rgb), 255);
 
   @return ($red * 0.2126) + ($green * 0.7152) + ($blue * 0.0722);
 }
@@ -530,45 +548,45 @@ fieldset.system-field label:before {
 
 @each $color-key, $color-var in $colors {
   @each $shade, $value in $color-var {
-    .color-#{$color-key}-#{$shade} {
+    .color-#{""+ $color-key}-#{$shade} {
       color: $value !important;
     }
 
     // Default filled button
-    :is(button, [type="submit"], [type="button"], [role="button"]).button-#{$color-key}-#{$shade},
-    [type="reset"].button-#{$color-key}-#{$shade} {
+    :is(button, [type="submit"], [type="button"], [role="button"]).button-#{""+ $color-key}-#{$shade},
+    [type="reset"].button-#{""+ $color-key}-#{$shade} {
       color: get-contrast-color($value);
       border-color: $value;
       background-color: $value;
     }
 
     // Outline version — overrides background and text color
-    :is(button, [type="submit"], [type="button"], [role="button"]).button-#{$color-key}-#{$shade}.outline,
-    [type="reset"].button-#{$color-key}-#{$shade}.outline {
+    :is(button, [type="submit"], [type="button"], [role="button"]).button-#{""+ $color-key}-#{$shade}.outline,
+    [type="reset"].button-#{""+ $color-key}-#{$shade}.outline {
       background-color: transparent;
       color: $value;
     }
 
-    :is(a).color-#{$color-key}-#{$shade} {
+    :is(a).color-#{""+ $color-key}-#{$shade} {
       text-decoration-color: $value !important;
     }
   }
 
-  @if map-has-key($color-var, 500) {
-    .color-#{$color-key} {
-      @extend .color-#{$color-key}-500;
+  @if map.has-key($color-var, 500) {
+    .color-#{""+ $color-key} {
+      @extend .color-#{""+ $color-key}-500;
     }
 
-    :is(button, [type="submit"], [type="button"], [role="button"]).button-#{$color-key},
-    [type="reset"].button-#{$color-key} {
-      @extend .button-#{$color-key}-500;
+    :is(button, [type="submit"], [type="button"], [role="button"]).button-#{""+ $color-key},
+    [type="reset"].button-#{""+ $color-key} {
+      @extend .button-#{""+ $color-key}-500;
     }
   }
 }
 
 
 @each $size, $data in $breakpoints {
-  $breakpoint: map-get($data, breakpoint);
+  $breakpoint: map.get($data, breakpoint);
   @media (max-width: $breakpoint) {
     .hide-below-#{$size} {
       display: none;

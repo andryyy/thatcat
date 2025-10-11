@@ -290,11 +290,7 @@ class Server(ServerBase):
                 raise LockException("Timeout acquiring local lock")
             raise LockException(f"Unhandled exception: {str(e)}")
 
-    async def run(
-        self,
-        shutdown_trigger: asyncio.Event,
-        shutdown_hook: asyncio.Event | None = None,
-    ) -> None:
+    async def run(self, shutdown_trigger: asyncio.Event) -> None:
         """
         Run the cluster server.
 
@@ -311,16 +307,6 @@ class Server(ServerBase):
 
         self.shutdown_trigger = shutdown_trigger
 
-        if not isinstance(shutdown_hook, asyncio.Event):
-            logger.warning(
-                "Ignoring 'shutdown_hook': value must be of type asyncio.Event"
-            )
-            shutdown_hook = None
-
-        logger.info(
-            f"Listening on {self.port} on address {' and '.join(self.peers.local.server_bindings)}..."
-        )
-
         async with self.server:
             binds = [s.getsockname()[0] for s in self.server.sockets]
             for local_rbind in self.peers.local.server_bindings:
@@ -329,15 +315,15 @@ class Server(ServerBase):
                     shutdown_trigger.set()
                     return
 
-            sent = await self.send_command("INIT", "*")
+            logger.info(f"Listening on {binds}")
 
-            t = asyncio.create_task(self.watchdog.server(), name="tickets")
-            self.tasks.add(t)
-            t.add_done_callback(self.tasks.discard)
+            await self.send_command("INIT", "*")
+
+            asyncio.create_task(self.watchdog.server(), name="tickets")
 
             try:
                 await shutdown_trigger.wait()
-                raise asyncio.CancelledError("Shutting down")
+                self.server.close()
             except asyncio.CancelledError:
                 shutdown_trigger.set()
             finally:
@@ -360,6 +346,5 @@ class Server(ServerBase):
                 ):
                     logger.error(results)
 
-                if shutdown_hook is not None:
-                    logger.info("Completed cluster shutdown, setting shutdown hook")
-                    shutdown_hook.set()
+                self.server.abort_clients()
+                await self.server.wait_closed()

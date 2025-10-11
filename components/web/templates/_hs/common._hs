@@ -109,7 +109,7 @@ behavior bodydefault
   init set :reloadCounter to 1 end
 
   on htmx:wsError or htmx:wsClose
-    set #ws-indicator's textContent to '⭕'
+    set #ws-indicator's @class to 'color-red shine'
   end
 
   on forceReload
@@ -123,7 +123,6 @@ behavior bodydefault
     wait for a forceReload or 400ms
     if result's type is 'forceReload'
       increment :reloadCounter
-      log :reloadCounter
     else
       set :reloadCounter to 1
     end
@@ -150,14 +149,6 @@ behavior bodydefault
       trigger notification(title: '{{ L["Server error"] }}', level: 'error', message: '{{ L["The server could not handle the given request"] }}', duration: 10000)
     else if status == 404
       trigger notification(title: '{{ L["Not found"] }}', level: 'error', message: `{{ L["Route not found"] }}: ${event.detail.xhr.responseURL}`, duration: 3000)
-    end
-  end
-
-  on htmx:configRequest
-    if window.vault.isUnlocked()
-      repeat for p in event.detail.parameters
-        log p
-      end
     end
   end
 

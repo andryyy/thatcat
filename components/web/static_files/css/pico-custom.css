@@ -2968,6 +2968,13 @@ textarea,
   --pico-line-height: 1.4;
 }
 
+.encrypted-field {
+  font-family: monospace;
+  border-color: #d92662;
+  user-select: none;
+  -webkit-text-security: disc;
+}
+
 .shine {
   text-decoration: none !important;
   background: linear-gradient(135deg, currentColor 0%, color-mix(in srgb, currentColor 80%, white) 25%, color-mix(in srgb, currentColor 60%, white) 50%, color-mix(in srgb, currentColor 80%, white) 75%, currentColor 100%);
@@ -2976,6 +2983,7 @@ textarea,
   -webkit-text-fill-color: transparent;
 }
 
+.small,
 small {
   font-size: 0.875rem;
   color: var(--pico-muted-color);
@@ -3000,9 +3008,9 @@ nav[aria-label=breadcrumb] span {
   margin-inline-start: calc(var(--pico-nav-link-spacing-horizontal) * -1);
 }
 
-#nav-theme-bulb {
+#nav-theme {
   cursor: pointer !important;
-  text-decoration: none;
+  text-decoration: underline;
 }
 
 .leaflet-marker-icon {
@@ -3036,8 +3044,19 @@ nav[aria-label=breadcrumb] span {
   display: none;
 }
 
-.dark {
-  filter: grayscale(100%);
+@keyframes shake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  10%, 30%, 50%, 70%, 90% {
+    transform: translateX(-10px);
+  }
+  20%, 40%, 60%, 80% {
+    transform: translateX(10px);
+  }
+}
+.shake {
+  animation: shake 200ms ease-in-out;
 }
 
 table td article {
@@ -3220,8 +3239,9 @@ button[type=submit] {
   width: auto;
 }
 
-dialog article {
-  max-width: 65%;
+dialog article,
+dialog div {
+  max-width: 55%;
 }
 
 .no-text-wrap {
@@ -3344,13 +3364,14 @@ hgroup ol, hgroup ul {
   :root {
     --pico-font-size: 12pt;
   }
+  dialog article,
+  dialog div {
+    max-width: 85%;
+  }
   #notification-container {
     left: 0;
     bottom: 0;
     width: 100%;
-  }
-  dialog article {
-    max-width: 95%;
   }
   .grid-auto-cols {
     display: grid;

@@ -46,34 +46,31 @@ behavior vaultConfig(formId, isInit)
 end
 
 
-behavior vaultToggle
+behavior vaultDialog
   def setUnlocked
-    get #vault-unlock-pin
-      add @disabled to it
-    get #vault-unlock
+    add .hidden to <fieldset/> in me
+    get .vault-unlock in me
       set its textContent to '{{ L["Lock"] }}'
       remove @disabled from it
-    set #vault-dialog-toggle's @class to 'color-green shine'
+    set #vault-dialog-toggle's @class to 'shine color-green'
     set #vault-dialog-toggle's textContent to '{{ L["Vault"] }} 🔓'
   end
 
   def setLocked
-    get #vault-unlock-pin
-      remove @disabled from it
-    get #vault-unlock
+    remove .hidden from <fieldset/> in me
+    get .vault-unlock in me
       set its textContent to '{{ L["Unlock"] }}'
       remove @disabled from it
-    set #vault-dialog-toggle's @class to 'color-pink shine'
+    set #vault-dialog-toggle's @class to 'shine color-pink'
     set #vault-dialog-toggle's textContent to '{{ L["Vault"] }} 🔒'
   end
 
   def novault
-    get #vault-unlock-pin
-      add @disabled to it
-    get #vault-unlock
+    add .hidden to <fieldset/> in me
+    get .vault-unlock in me
       add @disabled to it
       set its textContent to '{{ L["Not available"] }}'
-    set #vault-dialog-toggle's @class to 'color-zinc-650 shine'
+    set #vault-dialog-toggle's @class to 'shine color-zinc-650'
     set #vault-dialog-toggle's textContent to '{{ L["Vault not available"] }}'
   end
 
@@ -81,43 +78,43 @@ behavior vaultToggle
     if window.vault.isUnlocked()
       call setUnlocked()
     else
-      if #vault-unlock's @data-vault != "" and @data-vault != "{}"
-        call setLocked()
-      else
-        call novault()
-      end
+      get .vault-unlock in me
+        if its @data-vault != "" and its @data-vault != "{}"
+          call setLocked()
+        else
+          call novault()
+        end
     end
   end
 
   on profileUpdate from body
-  log event.detail.vault
-  log event.detail.vault
-  log event.detail.vault
-    if event.detail.vault and #vault-unlock's @data-vault != event.detail.vault
-      set #vault-unlock's @data-vault to event.detail.vault
-      if event.detail.vault != "{}" and event.detail.vault != ""
-        call window.vault.lock()
-        call setLocked()
+    get .vault-unlock in me
+      if event.detail.vault and its @data-vault != event.detail.vault
+        set its @data-vault to event.detail.vault
+        if event.detail.vault != "{}" and event.detail.vault != ""
+          call window.vault.lock()
+          call setLocked()
+        end
       end
-    end
   end
 
-  on keydown[keyCode == 13] from #vault-unlock-pin
-    trigger click on #vault-unlock unless #vault-unlock-pin's value is empty
+  on keydown[keyCode == 13] from .vault-unlock-pin in me
+    trigger click on .vault-unlock in me unless event.target's value is empty
   end
 
-  on click from #vault-unlock
+  on click from .vault-unlock in me
     halt the event
     if not window.vault.isUnlocked()
-      throw '{{ L["Password missing"] }}' unless value of #vault-unlock-pin
-      call JSON.parse(#vault-unlock's @data-vault) set keyData to the result
-      call VaultUnlockPrivateKey(value of #vault-unlock-pin, keyData)
+      set pin to (value of .vault-unlock-pin in me)
+      throw '{{ L["Password missing"] }}' unless pin
+      call JSON.parse(event.target's @data-vault) set keyData to the result
+      call VaultUnlockPrivateKey(pin, keyData)
       call setUnlocked()
     else
       call window.vault.lock()
       call setLocked()
     end
-    set value of #vault-unlock-pin to ''
+    set value of (.vault-unlock-pin in me) to ''
     remove @open from closest <dialog/>
   end
 
@@ -129,5 +126,62 @@ behavior vaultToggle
       duration: 5000,
       locations: ['menu-vault-unlock-pin']
     )
+  end
+end
+
+behavior vaultField
+  init
+    set :isActive to false
+    if (my value).startsWith('uv:')
+      add .encrypted-field
+      add @readonly
+    end
+    put `<label class="small" _="on click
+      halt the event's bubbling
+      trigger vaultToggle on #${my id}
+    end">
+      <input id="${my id + '-vault-toggle'}" type="checkbox" role="switch"/>
+      {{ L["Encrypt data"] }}
+    </label>` as Fragment after me
+    set :toggle to #{my id + '-vault-toggle'}
+    set :toggle.checked to (I match .encrypted-field)
+  end
+  on vaultToggle queue last
+    add @disabled to :toggle
+    if not :toggle.checked and I match .encrypted-field
+      set :toggle.checked to true
+      add .shake to :toggle settle remove .shake from :toggle
+    else if :toggle.checked and I do not match .encrypted-field
+      if window.vault.isUnlocked()
+        vaultField('encrypt')
+      else
+        set :toggle.checked to false
+        add .shake to :toggle settle remove .shake from :toggle
+      end
+    end
+    remove @disabled from :toggle
+  end
+  on blur or change
+    vaultField('encrypt')
+  end
+  on focus or click from closest <fieldset/>
+    vaultField('decrypt')
+  end
+  on htmx:beforeRequest from closest <form/> queue none
+    halt the event unless :isActive is false
+  end
+  def vaultField(mode)
+    exit unless window.vault.isUnlocked() and my value and :toggle.checked
+    set :isActive to true
+    if I match .encrypted-field and mode == 'decrypt'
+      set my value to window.vault.decryptData(my value)
+      remove .encrypted-field
+      remove @readonly
+    else if I do not match .encrypted-field and mode == 'encrypt'
+      set my value to window.vault.encryptData(my value)
+      add .encrypted-field
+      add @readonly
+    end
+    set :isActive to false
   end
 end

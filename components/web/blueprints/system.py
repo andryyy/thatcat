@@ -14,8 +14,6 @@ from components.models import SystemSettings, SystemSettingsPatch
 from dataclasses import asdict, replace
 from components.utils.misc import batch
 from components.utils.datetimes import datetime
-from components.logs import logger
-from config import defaults
 
 blueprint = Blueprint("system", __name__, url_prefix="/system")
 
@@ -93,6 +91,7 @@ async def cluster_logs():
         async with LOG_LOCK:
             parser_failed = False
             log_files = list(_log_file_generator())
+            print(log_files)
             with fileinput.input(log_files, encoding="utf-8") as f:
                 for line in f:
                     if q in line:
@@ -185,7 +184,7 @@ async def refresh_cluster_logs():
                 )
             except Exception as e:
                 if str(e).endswith("START_BEHIND_FILE_END"):
-                    a = await cluster.files.fileget(
+                    await cluster.files.fileget(
                         "logs/application.log", f"logs/application.{peer}.log", peer
                     )
 

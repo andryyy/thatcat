@@ -1,4 +1,4 @@
-<progress aria-busy="true" data-loading></progress>
+<progress data-loading></progress>
 
 <nav hx-target="#body-main">
   <ul>
@@ -28,7 +28,7 @@
     <li>
       <details class="dropdown" hx-on:click="event.target.nodeName==='A'?this.open=false:null">
         <summary>🧰</summary>
-        <ul dir="rtl">
+        <ul dir="ltr">
           <li>
             <a href="#" class="secondary" hx-get="/objects/projects">{{ L["Projects"] }}</a>
           </li>
@@ -70,7 +70,7 @@
     <li>
       <details class="dropdown" hx-on:click="event.target.nodeName==='A'?this.open=false:null">
         <summary>👤 {{ session.login }}</summary>
-        <ul dir="rtl">
+        <ul dir="ltr">
           <li>
             <a href="#" hx-get="/profile/">{{ L["Profile"] }}</a>
           </li>
@@ -85,82 +85,84 @@
   </ul>
 </nav>
 
-<details name="quick-control" open>
-  <summary>{{ L["Quick settings"] }}</summary>
+<div class="grid-space-between">
   {% if session["login"] %}
-  <div class="grid-space-between">
-    <div>
-      <a href="" class="shine"
-        id="vault-dialog-toggle"
-        _="on click halt the event add @open to #vault-dialog call #vault-unlock-pin.focus() end">
-      </a>
-    </div>
-    <div>
-    {% for role in session.get("acl", []) %}
-      <mark>{{ role }}</mark>
-    {% endfor %}
-    </div>
-  </div>
-  <dialog id="vault-dialog">
-    <article>
-      <header>
-        <h6>{{ L["Manage Vault"] }}</h6>
-      </header>
-      <p>{{ L["Your vault will be kept unlocked until you refresh the window or lock it"] }}</p>
-      <fieldset _="install vaultToggle">
-        <input hx-disable
-          id="vault-unlock-pin"
-          name="vault-unlock-pin"
-          type="password"
-          placeholder="{{ L["Vault password"] }}"
-          autocomplete="off"
-          autocorrect="off"
-          data-protonpass-ignore="true"
-          autocapitalize="off"
-          spellcheck="false"/>
-        <a role="button" href="#" id="vault-unlock" data-vault='{{ session.profile.vault or "" }}'>...</a>
-      </fieldset>
-      <footer>
-        <button _="on click remove @open from closest <dialog/>">{{ L["Close"] }}</button>
-      </footer>
-    </article>
+  <a href="" id="vault-dialog-toggle" class="color-zinc-800 shine"
+    _="on click halt the event add @open to #vault-dialog call (first .vault-unlock-pin in #vault-dialog).focus() end">
+    {{ L["Vault loading"] }}...
+  </a>
+  <dialog id="vault-dialog" _="install vaultDialog">
+  <article>
+    <p class="grid-space-between">
+      <b>{{ L["Vault"] }}</b>
+      <a href="#" _="on click halt the event remove @open from closest <dialog/>">{{ L["Close"] }}</a>
+    </p>
+    <hr>
+    <fieldset id="vault-unlock-fieldset">
+      <label>{{ L["Vault password"] }}</label>
+      <input hx-disable
+        class="vault-unlock-pin"
+        name="vault-unlock-pin"
+        type="password"
+        autocomplete="off"
+        autocorrect="off"
+        data-protonpass-ignore="true"
+        autocapitalize="off"
+        spellcheck="false"/>
+      <small>{{ L["Your vault will be kept unlocked until you refresh the window or lock it"] }}</small>
+    </fieldset>
+    <button class="vault-unlock" data-vault='{{ session.profile.vault or "" }}'>...</button>
+  </article>
   </dialog>
   {% endif %}
-
-  <div hx-target="#body-main" class="grid-end">
-    <span id="ws-indicator"
-      {% if session["login"] %}
-      class="no-text-decoration"
-      {% else %}
-      class="no-text-decoration dark"
-      {% endif %}
-      hx-swap-oob="outerHTML">⭕</span>
-    <span id="nav-theme-bulb"
-      _="on updateTheme
-          if not localStorage.theme
-            if window.matchMedia('(prefers-color-scheme: light)').matches
-              set (@data-theme of <html/>) to 'light'
-            else
-              set (@data-theme of <html/>) to 'dark'
-            end
-          else
-            set (@data-theme of <html/>) to localStorage.theme
-          end
-          set my @class to (@data-theme of <html/>)
-          set localStorage.theme to (@data-theme of <html/>)
+  <div id="nav-meta" class="small">
+    <span>
+      {% if session["login"] %}{{ L["Connection"] }}:{% endif %}
+      <span id="ws-indicator" hx-swap-oob="outerHTML"></span>
+    </span>
+    <span>
+      {{ L["Theme"] }}:
+      <span id="nav-theme"
+      _="init
+          trigger updateTheme
         end
-        init trigger updateTheme end
+
+        on updateTheme
+            if not localStorage.theme
+              if window.matchMedia('(prefers-color-scheme: light)').matches
+                toggleLight('light')
+              else
+                toggleLight('dark')
+              end
+            else
+              toggleLight(localStorage.theme)
+            end
+        end
+
         on click
           halt the event
           if I match .light
+            toggleLight('dark')
+          else
+            toggleLight('light')
+          end
+        end
+
+        def toggleLight(mode)
+          if mode == 'dark'
             set (@data-theme of <html/>) to 'dark'
+            set #nav-theme's @class to 'dark'
+            set localStorage.theme to 'dark'
+            put '{{ L['light'] }}' into #nav-theme
           else
             set (@data-theme of <html/>) to 'light'
+            set #nav-theme's @class to 'light'
+            set localStorage.theme to 'light'
+            put '{{ L['dark'] }}' into #nav-theme
           end
-          set localStorage.theme to (@data-theme of <html/>)
-          toggle between .light and .dark
         end
-      ">&#128161;
+      ">
+      </span>
     </span>
   </div>
-</details>
+</div>

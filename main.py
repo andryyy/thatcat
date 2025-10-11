@@ -4,10 +4,8 @@ import ssl
 
 from components.cluster import cluster
 from components.database import db
-from components.logs import logger
 from components.web.app import app
 from config import defaults
-from contextlib import asynccontextmanager
 from hypercorn.asyncio import serve
 from hypercorn.config import Config
 from hypercorn.middleware import ProxyFixMiddleware
@@ -19,18 +17,14 @@ hypercorn_config.keyfile = defaults.TLS_KEYFILE
 hypercorn_config.include_server_header = False
 hypercorn_config.server_names = defaults.HOSTNAME
 hypercorn_config.ciphers = "ECDHE+AESGCM"
-hypercorn_config.shutdown_timeout = 1.25
+hypercorn_config.shutdown_timeout = 0.5
+hypercorn_config.graceful_timeout = 0.75
 
 app.stop_event = asyncio.Event()
-cluster_stop_event = asyncio.Event()
-
-
-class TerminateTaskGroup(Exception):
-    """Exception raised to terminate a task group."""
 
 
 def handle_shutdown() -> None:
-    cluster_stop_event.set()
+    app.stop_event.set()
 
 
 async def main():
@@ -49,32 +43,28 @@ async def main():
 
     try:
         async with asyncio.TaskGroup() as tg:
-            async with db:
-                db.cluster = cluster
-
+            db.cluster = cluster
+            web_server = serve(
+                ProxyFixMiddleware(app, mode="legacy", trusted_hops=1),
+                hypercorn_config,
+                shutdown_trigger=app.stop_event.wait,
+            )
             tg.create_task(
-                serve(
-                    ProxyFixMiddleware(app, mode="legacy", trusted_hops=1),
-                    hypercorn_config,
-                    shutdown_trigger=app.stop_event.wait,
-                ),
+                web_server,
                 name="qrt",
             )
             tg.create_task(
-                cluster.run(
-                    shutdown_trigger=cluster_stop_event, shutdown_hook=app.stop_event
-                ),
+                cluster.run(shutdown_trigger=app.stop_event),
                 name="cluster",
             )
             await app.stop_event.wait()
-            raise TerminateTaskGroup()
-
-    except* Exception as e:
-        if not app.stop_event.is_set():
-            for exc in e.exceptions:
-                logger.critical(exc)
-            raise
-        pass
+    except* ssl.SSLError as e:
+        for err in e.exceptions:
+            if (
+                app.stop_event.is_set()
+                and err.reason == "APPLICATION_DATA_AFTER_CLOSE_NOTIFY"
+            ):
+                pass
 
 
 asyncio.run(main())

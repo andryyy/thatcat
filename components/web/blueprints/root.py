@@ -3,7 +3,17 @@ import json
 import os
 
 from components.utils.osm import display_name_to_location, CoordsResolver
-from quart import Blueprint, abort, current_app, redirect, render_template, send_from_directory, session, url_for, websocket
+from quart import (
+    Blueprint,
+    abort,
+    current_app,
+    redirect,
+    render_template,
+    send_from_directory,
+    session,
+    url_for,
+    websocket,
+)
 from components.web.utils.wrappers import acl, session_clear, websocket_acl
 from components.cluster import cluster
 from components.cluster.files import FileGetException
@@ -11,6 +21,10 @@ from components.database.states import STATE
 
 blueprint = Blueprint("main", __name__, url_prefix="/")
 HS_DIR = os.path.abspath("components/web/templates/_hs")
+
+
+class TerminateWebsocketTaskGroup(Exception):
+    pass
 
 
 @blueprint.route("/")
@@ -73,24 +87,32 @@ async def logout():
 @blueprint.websocket("/ws")
 @websocket_acl("any")
 async def ws():
+
     await websocket.send(
-        '<span class="no-text-decoration" id="ws-indicator" hx-swap-oob="outerHTML">🟢</span>'
+        '<span class="color-green shine" id="ws-indicator" hx-swap-oob="outerHTML">🔌</span>'
     )
-    data_dict = None
-    while not current_app.stop_event.is_set():
+
+    async def _shutdown_monitor():
+        await current_app.stop_event.wait()
+        raise TerminateWebsocketTaskGroup()
+
+    async def _ws_handler():
         try:
-            async with asyncio.timeout(5):
+            while True:
                 data = await websocket.receive()
-            data_dict = json.loads(data)
-            if "path" in data_dict:
-                STATE.ws_connections[session["login"]][
-                    websocket._get_current_object()
-                ] = {
-                    "path": data_dict["path"],
-                }
-        except TimeoutError:
-            if not data_dict:
-                await websocket.close(1000)
-                break
-            data_dict = None
-            await websocket.send("PING")
+                data_dict = json.loads(data)
+                if "path" in data_dict:
+                    STATE.ws_connections[session["login"]][
+                        websocket._get_current_object()
+                    ] = {
+                        "path": data_dict["path"],
+                    }
+        except asyncio.CancelledError:
+            await websocket.close(1001)
+
+    try:
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(_shutdown_monitor())
+            tg.create_task(_ws_handler())
+    except* TerminateWebsocketTaskGroup:
+        pass
