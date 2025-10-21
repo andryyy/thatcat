@@ -1,9 +1,16 @@
 from components.models.assets import Asset
 from components.models.coords import Location
-from components.models.helpers import *
+from components.models.helpers import (
+    to_str,
+    validate_uuid_str,
+    to_int,
+    to_location,
+    to_asset_from_str,
+)
 from components.utils.datetimes import utc_now_as_str
 from dataclasses import dataclass, field, asdict
 from uuid import uuid4
+from typing import Any
 
 
 @dataclass
@@ -18,14 +25,20 @@ class ProcessingData:
     assigned_user: str
     assets: list[Asset | dict | None] | str = field(default_factory=list)
     location: Location | dict | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
     vin: str | None = None
 
 
 @dataclass
 class Processing(ProcessingData, ProcessingBase):
     def __post_init__(self) -> None:
+        from components.utils.vins.processor import VINProcessor
+
         self.id = validate_uuid_str(self.id)
         self.doc_version = to_int(self.doc_version)
+
+        if not isinstance(self.metadata, dict):
+            raise ValueError("metadata", "'metadata' must be a dict")
 
         if not isinstance(self.created, str) or to_str(self.created.strip()) == "":
             raise ValueError("created", "'created' must be a non-empty string")
@@ -48,7 +61,7 @@ class Processing(ProcessingData, ProcessingBase):
                     f"'vin' must be non-empty string, got {type(self.vin).__name__}",
                 )
             self.vin = to_str(self.vin.strip())
-            if not VinTool.verify_checksum(self.vin):
+            if not VINProcessor.validate_vin(self.vin):
                 raise ValueError("vin", "'vin' is not a valid VIN")
 
         if self.assets:

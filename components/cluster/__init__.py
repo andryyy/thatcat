@@ -9,6 +9,7 @@ from .watchdog import Watchdog
 from .peers import Peers
 from .server import Server
 
+
 cluster = Server(port=2102)
 cluster.peers = Peers(cluster)
 cluster.watchdog = Watchdog(cluster)

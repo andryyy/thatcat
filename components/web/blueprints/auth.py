@@ -1,4 +1,4 @@
-from quart import Blueprint, abort, redirect, render_template, request, session, url_for
+from quart import Blueprint, render_template, request, session
 from components.web.utils.wrappers import acl, session_clear
 from components.web.utils.notifications import trigger_notification, validation_error
 from components.web.utils.utils import ws_htmx
@@ -12,7 +12,14 @@ from components.web.utils.passkeys import (
 )
 from components.database import db
 from components.database.states import STATE
-from components.models import User, UserAdd, Authentication, TokenConfirmation, UserSession, CredentialAdd
+from components.models.users import (
+    User,
+    UserAdd,
+    Authentication,
+    TokenConfirmation,
+    UserSession,
+    CredentialAdd,
+)
 from dataclasses import asdict
 from components.logs import logger
 from components.utils.datetimes import utc_now_as_str
@@ -233,7 +240,7 @@ async def login_token_verify():
             login=user.login,
             id=user.id,
             acl=user.acl,
-            cred_id=credential_id,
+            cred_id=None,
             lang=request.accept_languages.best_match(defaults.ACCEPT_LANGUAGES),
             profile=user.profile,
         )
@@ -260,7 +267,7 @@ async def login_webauthn_options():
 
 @blueprint.route("/register/webauthn/options", methods=["POST"])
 async def register_webauthn_options():
-    if not "id" in session:
+    if "id" not in session:
         request_data = Authentication(**request.form_parsed)
         async with db:
             user = await db.search("users", {"login": request_data.login})
@@ -325,7 +332,7 @@ async def auth_login_verify():
 
         for credential in user.credentials:
             if credential.id == credential_id.hex():
-                if credential.active == False:
+                if not credential.active:
                     return "Passkey is disabled", 409
                 matched_user_credential = credential
                 break

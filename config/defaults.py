@@ -31,3 +31,4 @@ CLUSTER_SELF = {
 CLUSTER_CLI_BINDINGS = ["127.0.0.1", "::1"]
 CLUSTER_PEERS_TIMEOUT = 1.25
 OSM_EMAIL = "andre.peters@debinux.de"
+CLAUDE_DEFAULT_MODEL = "claude-sonnet-4-5"

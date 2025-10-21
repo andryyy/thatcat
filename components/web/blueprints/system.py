@@ -3,17 +3,17 @@ import fileinput
 import json
 import os
 
-from quart import Blueprint, render_template, request, session
-from components.web.utils.wrappers import acl
-from components.web.utils.notifications import trigger_notification
-from components.web.utils.utils import ws_htmx
-from components.web.utils.tables import table_search_helper
-from components.database import db
 from components.cluster import cluster
-from components.models import SystemSettings, SystemSettingsPatch
-from dataclasses import asdict, replace
-from components.utils.misc import batch
+from components.database import db
+from components.models.system import SystemSettings, SystemSettingsPatch
 from components.utils.datetimes import datetime
+from components.utils.misc import batch
+from components.web.utils.notifications import trigger_notification
+from components.web.utils.tables import table_search_helper
+from components.web.utils.utils import ws_htmx
+from components.web.utils.wrappers import acl
+from dataclasses import asdict, replace
+from quart import Blueprint, render_template, request, session
 
 blueprint = Blueprint("system", __name__, url_prefix="/system")
 
@@ -42,13 +42,18 @@ async def status():
 @blueprint.route("/settings", methods=["PATCH"])
 @acl("system")
 async def write_settings():
+    patch_data = SystemSettingsPatch(**request.form_parsed)
+
     async with db:
         system_settings = await db.get("system_settings", "1")
-        system_settings = SystemSettings(**system_settings)
-        patch_data = SystemSettingsPatch(**request.form_parsed)
-        system_settings = replace(system_settings, **patch_data.dump_patched())
-        system_settings_dict = asdict(system_settings)
-        await db.patch("system_settings", "1", system_settings_dict)
+        if system_settings:
+            system_settings = SystemSettings(**system_settings)
+            system_settings = replace(system_settings, **patch_data.dump_patched())
+            system_settings_dict = asdict(system_settings)
+            await db.patch("system_settings", "1", system_settings_dict)
+        else:
+            system_settings_dict = asdict(patch_data)
+            await db.upsert("system_settings", "1", system_settings_dict)
 
     return trigger_notification(
         level="success",
@@ -64,9 +69,12 @@ async def settings():
     async with db:
         system_settings = await db.get("system_settings", "1")
 
-    return await render_template(
-        "system/settings.html", settings=SystemSettings(**system_settings)
-    )
+    if system_settings:
+        system_settings = SystemSettings(**system_settings)
+    else:
+        system_settings = SystemSettingsPatch()
+
+    return await render_template("system/settings.html", settings=system_settings or {})
 
 
 @blueprint.route("/logs")
@@ -91,7 +99,6 @@ async def cluster_logs():
         async with LOG_LOCK:
             parser_failed = False
             log_files = list(_log_file_generator())
-            print(log_files)
             with fileinput.input(log_files, encoding="utf-8") as f:
                 for line in f:
                     if q in line:

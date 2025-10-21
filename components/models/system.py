@@ -1,6 +1,7 @@
 from components.utils.datetimes import utc_now_as_str
-from components.models.helpers import *
+from components.models.helpers import to_str, to_int
 from dataclasses import dataclass, field, fields
+from config.defaults import CLAUDE_DEFAULT_MODEL
 
 
 @dataclass
@@ -12,7 +13,9 @@ class SystemSettingsBase:
 
 @dataclass
 class SystemSettingsData:
-    GOOGLE_VISION_API_KEY: str | None = None
+    claude_model: str | None = CLAUDE_DEFAULT_MODEL
+    claude_api_key: str | None = None
+    google_vision_api_key: str | None = None
 
 
 @dataclass
@@ -39,7 +42,10 @@ class SystemSettings(SystemSettingsData, SystemSettingsBase):
 
         self.doc_version = to_int(self.doc_version)
 
-        if self.GOOGLE_VISION_API_KEY is not None:
-            self.GOOGLE_VISION_API_KEY = (
-                to_str(self.GOOGLE_VISION_API_KEY.strip()) or None
+        if self.claude_api_key is not None:
+            self.claude_api_key = to_str(self.claude_api_key.strip()) or None
+
+        if self.claude_model is not None:
+            self.claude_model = (
+                to_str(self.claude_model.strip()) or CLAUDE_DEFAULT_MODEL
             )

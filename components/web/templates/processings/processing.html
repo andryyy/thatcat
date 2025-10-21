@@ -8,81 +8,43 @@
       end">{{ L["Toggle size"] }} 🔎</a>
     </small>
   </p>
+
   <h6>{{ processing.filename|truncate(30, True, '...') }} </h6>
   <form class="create-object"
-    hx-trigger="submit throttle:200ms"
+    hx-trigger="createObject throttle:200ms"
     hx-post="/objects/cars"
     hx-disinherit="*"
     _="on htmx:afterRequest[event.detail.successful==true]
       trigger completeObject on .complete-object in #processing-{{ processing.id }}
     end">
-    {% if processing.vin %}
+    {% with
+      schema=forms.objects.processings,
+      current_data=processing
+    %}
+      {% include "includes/form_builder.html" %}
+    {% endwith %}
+
+    {% if processing.metadata %}
     <fieldset>
-      <label for="vin-{{ processing.id }}">{{ L["VIN"] }}</label>
-      <input id="vin-{{ processing.id }}" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" type="text" name="vin" value="{{ processing.vin }}">
-    </fieldset>
-    {% else %}
-    <fieldset>
-      <label for="vin-{{ processing.id }}">{{ L["VIN"] }}</label>
-      <input id="vin-{{ processing.id }}" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" type="text" name="vin" value="" aria-invalid="true">
-      <small>❗ {{ L["No VIN detected"] }}</small>
+      <legend>{{ L["Metadata"] }}</legend>
+      <p><small>{{ L["Metadata from processor"] }}</small></p>
+      {% for meta in processing.metadata %}
+      <details>
+        <summary>{{ L[meta|capitalize] }}</summary>
+        <blockquote>{{ processing.metadata[meta] }}</blockquote>
+      </details>
+      {% endfor %}
     </fieldset>
     {% endif %}
 
-    <fieldset>
-      <label for="project-{{ processing.id }}">{{ L["Project"] }}</label>
-      <select autocomplete="off"
-        name="assigned_project"
-        id="project-{{ processing.id }}">
-        {% for project_id, project_data in request.form_options.projects.items() if project_data.permitted == True %}
-        <option value="{{ project_id }}">{{ project_data.name }}</option>
-        {% endfor %}
-        <option value="" selected>{{ L["No assignment"] }}</option>
-      </select>
-    </fieldset>
-
-    <fieldset data-field-type="location">
-      <legend>{{ L["Location"] }}</legend>
-      {% if processing.location and processing.location._is_valid %}
-      <input type="hidden" name="location.lon" value='{{ processing.location.lon }}' />
-      <input type="hidden" name="location.lat" value='{{ processing.location.lat }}' />
-      <input type="hidden" name="location.display_name" value='{{ processing.location.display_name }}' />
-      <p>
-        {{ L["Extracted location"] }}: {{ processing.location.display_name }}
-      </p>
-      {% else %}
-      <p>{{ L["The image did not contain location data"] }}.</p>
-      {% endif %}
-    </fieldset>
-
-    <fieldset>
-      <legend>{{ L["Files"] }}</legend>
-      <p>
-        <small>{{ L["Related Files"] }}</small>
-      </p>
-      {% if processing.assets %}
-        {% for asset in processing.assets %}
-        <details>
-          <summary>{{ L["Attachment"] }} {{ loop.index }} - "{{ asset.filename }}"</summary>
-          {% if asset.mime_type.startswith("image/") %}
-          <img src="/asset/{{ asset.id }}" alt="- {{ asset.filename }}"/>
-          {% endif %}
-        </details>
-        {% endfor %}
-        <input type="hidden" name="assets" value='{{ processing.assets|tojson }}'/>
-      {% else %}
-      <p>
-        <mark>{{ L["No files available"] }}</mark>
-      </p>
-      {% endif %}
-    </fieldset>
-
     <div class="grid-space-between">
-      <button data-loading-disable type="submit" class="no-text-wrap" _="install buttonCheckHtmxResponse">{{ L["Create"] }}</button>
-      <a role="button" class="button-red" _="install confirmButton
+      <button data-loading-disable _="on click trigger createObject end" _="install buttonCheckHtmxResponse">{{ L["Create"] }}</button>
+      <button data-loading-disable class="button-red" _="install confirmButton
           on confirmedButton
             trigger removeObject on .remove-object in #processing-{{ processing.id }}
-          end">{{ L["Discard"] }}</a>
+          end">
+          {{- L["Discard"] -}}
+      </button>
     </div>
   </form>
 

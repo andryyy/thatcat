@@ -28,7 +28,7 @@ DATA FIELDS
 
   {% elif v.type == "location" %}
 
-    <fieldset data-loading-disable data-field-type="location">
+    <fieldset autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-loading-disable data-field-type="location">
       <label>{{ L[v.title] }}</label>
 
       {% if v.description %}
@@ -36,75 +36,62 @@ DATA FIELDS
       {% endif %}
 
       {% if current_data[k] %}
-      <div id="leaflet-{{ form_id }}" _="install selectFromLeaflet(
-        formId: '{{ form_id }}',
-        options: {
-          coords: { lat: {{ current_data[k].lat }}, lon: {{ current_data[k].lon }}, display_name: '{{ current_data[k].display_name }}', zoom: 15 }})">
-      <div>
-          {{ current_data[k].display_name }}
-          <br>
-          <small>
-            <a class="color-blue locked" href="" _="on click
-              halt the event
-              toggle .locked
-              if I match .locked
-                put '{{ L["Unlock"] }}' into me
-                trigger freeze on #leaflet-{{ form_id }}
-              else
-                put '{{ L["Reset"] }}' into me
-                trigger unfreeze on #leaflet-{{ form_id }}
-              end
-            end">
-            {{ L["Unlock"] }}
-              </a>
-          </small>
-      </div>
+      <div id="leaflet-{{ form_id }}" _="install selectFromLeaflet(formId: '{{ form_id }}', loc: {
+        lat: {{ current_data[k].lat }},
+        lon: {{ current_data[k].lon }},
+        radius: {{ current_data[k].radius }},
+        display_name: '{{ current_data[k].display_name }}',
+        zoom: {{ current_data[k].zoom }}
+      })">
+        <a class="leaflet-lock color-blue locked" href="">{{ L["Unlock"] }}</a>
       {% else %}
       <div id="leaflet-{{ form_id }}" _="install selectFromLeaflet(formId: '{{ form_id }}')">
       {% endif %}
-        <div class="leaflet-map" id="leaflet-map-{{ form_id }}"></div>
-        <progress id="leaflet-loading-{{ form_id }}"></progress>
-        <div id="leaflet-controls-{{ form_id }}" hidden>
-          <p>
-            <i id="leaflet-marker-name-{{ form_id }}">-</i>
-          </p>
+        <div class="leaflet-map"></div>
+        {% if request.view_args.get("object_type") == "projects" %}
+        <label>
+          {{ L["Radius"] }} <span class="leaflet-marker-radius"></span>
+          <input type="number" class="input-radius" name="{{ field_name }}.radius" value="{{ current_data[k].radius or 100 }}"/>
+        </label>
+        {% endif %}
+        <progress class="leaflet-loading"></progress>
+        <div class="leaflet-controls hidden">
+          <b class="leaflet-marker-name">-</b>
           <div class="grid-space-between">
-            <span class="pointer" id="leaflet-current-position-{{ form_id }}">
-              🎯 {{ L["Location"] }} <span id="leaflet-current-accuracy-{{ form_id }}">{{ L["Unknown"]|lower }}</span>
-            </span>
-            <div class="grid-end">
-              <details class="dropdown" hx-disinherit="*">
-                <summary>{{ L["Projects"] }}</summary>
-                <ul dir="rtl" id="leaflet-additional-markers-{{ form_id }}">
-                {% set current_project = current_data.assigned_project or object.id %}
-                {% for project_id, project_data in request.form_options.projects.items() if (project_data.permitted == True or project_id == current_project) and project_data.location %}
-                <li>
-                  <label>
-                    <input data-marker='{
-                      "id": "marker-{{ loop.index }}",
-                      "class": "leaflet-map-additional-marker {{ "hidden" if project_id != current_project }}",
-                      "name": "{{ project_data.name }}",
-                      "radius": {{ project_data.radius }},
-                      "coords": {{ project_data.location|tojson }}
-                    }' type="checkbox" {{ "checked" if project_id == current_project }} />
-                    {{ project_data.name }}
-                  </label>
-                </li>
-                {% else %}
-                <li>{{ L["No project available"] }}</li>
-                {% endfor %}
-                </ul>
-              </details>
-            </div>
+            <a role="button" href="" class="leaflet-current-position">
+              🎯 {{ L["Location"] }} <span class="leaflet-current-accuracy">{{ L["Unknown"]|lower }}</span>
+            </a>
+            <details class="dropdown leaflet-additional-markers" hx-disinherit="*">
+              <summary>{{ L["Projects"] }}</summary>
+              <ul dir="rtl">
+              {% if request.view_args.get("object_type") == "projects" and object and object.id %}
+                {% set current_project = object.id %}
+              {% else %}
+                {% set current_project = current_data.assigned_project or None %}
+              {% endif %}
+              {% for project_id, project_data in request.form_options.projects.items() if (project_data.permitted == True or project_id == current_project) and project_data.location %}
+              <li>
+                <label>
+                  <input autocomplete="off" data-marker='{
+                    "id": "marker-{{ loop.index }}",
+                    "class": "leaflet-map-additional-marker {{ "hidden" if project_id != current_project }}",
+                    "name": "{{ project_data.name }}",
+                    "loc": {{ project_data.location|tojson }}
+                  }' type="checkbox" {{ "checked" if project_id == current_project }} />
+                  {{ project_data.name }}
+                </label>
+              </li>
+              {% else %}
+              <li>{{ L["No project available"] }}</li>
+              {% endfor %}
+              </ul>
+            </details>
           </div>
-          <input id="leaflet-search-query-{{ form_id }}" type="text" placeholder="Suchbegriff" form="_none">
+          <input class="leaflet-search-query" type="text" placeholder="Suchbegriff">
         </div>
-        <input autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-          type="hidden" id="leaflet-lat-{{ form_id }}" name="{{ field_name }}.lat" value="{{ current_data[k].lat or 0.0 }}"/>
-        <input autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-          type="hidden" id="leaflet-lon-{{ form_id }}" name="{{ field_name }}.lon" value="{{ current_data[k].lon or 0.0 }}"/>
-        <input autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-          type="hidden" id="leaflet-display-name-{{ form_id }}" name="{{ field_name }}.display_name" value="{{ current_data[k].display_name or '' }}"/>
+        <input type="hidden" class="input-lat" name="{{ field_name }}.lat" value="{{ current_data[k].lat or 0.0 }}"/>
+        <input type="hidden" class="input-lon" name="{{ field_name }}.lon" value="{{ current_data[k].lon or 0.0 }}"/>
+        <input type="hidden" class="input-display-name" name="{{ field_name }}.display_name" value="{{ current_data[k].display_name or '' }}"/>
       </div>
     </fieldset>
 
@@ -122,7 +109,16 @@ DATA FIELDS
         <details>
           <summary>{{ L["Attachment"] }} {{ loop.index }} - "{{ asset.filename }}"</summary>
           {% if asset.mime_type.startswith("image/") %}
-          <img src="/asset/{{ asset.id }}" alt="- {{ asset.filename }}"/>
+          <div style="position: relative; display: inline-block;" _="on click
+            put my outerHTML into #img-zoom
+            add @open to #img-zoom
+            add .dialog-open to body
+          end">
+            <img _="install lazyLoadImage" data-src="/asset/{{ asset.id }}" style="display: block; max-width: 100%;" alt="{{ L["Loading"] }} {{ asset.filename }}" />
+            {% if asset.overlay %}{{ asset.overlay | safe }}{% endif %}
+          </div>
+          {% else %}
+            <a href="/asset/{{ asset.id }}">Download {{ asset.filename }}</a>
           {% endif %}
         </details>
         {% endfor %}
@@ -278,7 +274,7 @@ DATA FIELDS
             else
               remove closest .item-{{ form_id }}
             end
-          end">Entfernen</a>
+          end">{{ L["Remove"] }}</a>
         </small>
       </div>
     </template>
@@ -301,7 +297,7 @@ DATA FIELDS
         render #list:item
         put the result at the end of me
       end">
-      <legend>{{ L[v.title] }} <a href="#" class="add-list-item">Add</a></legend>
+      <legend>{{ L[v.title] }} <a href="#" class="add-list-item">{{ L["Add"] }}</a></legend>
     </fieldset>
     {% if v.description %}
     <small>{{ L[v.description|safe] }}</small>
@@ -338,10 +334,8 @@ DATA FIELDS
         {% elif project_id == current_data[k] %}
         <option value="{{ project_id }}" selected>⚠️ {{ project_data.name }}</option>
         {%- endif -%}
-      {% else %}
-        <option value="" selected>{{ L["No assignment"] }}</option>
       {% endfor %}
-      <option value="" {{ "selected" if not current_data[k] }}>{{ L["No assignment"] }}</option>
+      <option value="" {{ "selected" if not current_data[k] or not request.form_options.projects }}>{{ L["No assignment"] }}</option>
     </select>
     {% if v.description %}
     <small>{{ L[v.description|safe] }}</small>

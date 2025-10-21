@@ -35,6 +35,33 @@ behavior trCheckboxSelect
   end
 end
 
+behavior xhrProgress
+  init
+    add @hidden to me
+    put '<progress id="progress" value="0" max="100"></progress>' into me
+  end
+  on htmx:xhr:progress(loaded, total) from closest <form/>
+    set #progress.value to (loaded/total)*100
+  end
+  on htmx:xhr:loadstart from closest <form/>
+    remove @hidden from me
+  end
+  on htmx:xhr:loadend from closest <form/> or htmx:xhr:abort from closest <form/>
+    add @hidden to me
+    set #progress.value to 0
+  end
+end
+behavior lazyLoadImage
+  init set :loaded to false end
+  on intersection(intersecting) having threshold 0.1
+    if intersecting and not :loaded
+      set my src to my @data-src
+      wait for load
+      set :loaded to true
+    end
+  end
+end
+
 behavior buttonCheckHtmxResponse
   on htmx:afterRequest from closest <form/> to me
     if (closest <form/> to me) != (event.target) exit end

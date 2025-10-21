@@ -5,7 +5,7 @@ from components.web.utils.notifications import trigger_notification
 from components.web.utils.utils import render_or_json
 from components.web.utils.tables import table_search_helper
 from components.database import db
-from components.models import model_meta
+from components.models.objects import model_meta
 from dataclasses import asdict
 
 blueprint = Blueprint("objects", __name__, url_prefix="/objects")
@@ -51,7 +51,7 @@ async def before_request():
                         )
                     abort(404)
 
-                if not "system" in session["acl"]:
+                if "system" not in session["acl"]:
                     for f in model_meta["objects"]["system_fields"][object_type]:
                         if hasattr(match, f):
                             setattr(match, f, None)
@@ -103,9 +103,11 @@ async def get_objects(object_type: str):
                 q=q,
                 any_of=[filters],
                 sort_reverse=sort_reverse,
-                where={"assigned_users": session["id"]}
-                if not "system" in session["acl"]
-                else None,
+                where=(
+                    {"assigned_users": session["id"]}
+                    if "system" not in session["acl"]
+                    else None
+                ),
             )
 
         return await render_or_json(
@@ -119,7 +121,7 @@ async def get_objects(object_type: str):
 
 @blueprint.route("/<object_type>", methods=["POST"])
 async def create_object(object_type: str):
-    if object_type == "projects" and not "system" in session["acl"]:
+    if object_type == "projects" and "system" not in session["acl"]:
         raise ValueError("", "Only administrators can create projects")
 
     request.form_parsed["assigned_users"] = session["id"]
@@ -141,12 +143,14 @@ async def create_object(object_type: str):
         if hasattr(upsert_data, "assigned_project") and upsert_data.assigned_project:
             if not await db.search(
                 "projects",
-                where={
-                    "assigned_users": session["id"],
-                    "id": upsert_data.assigned_project,
-                }
-                if not "system" in session["acl"]
-                else {"id": upsert_data.assigned_project},
+                where=(
+                    {
+                        "assigned_users": session["id"],
+                        "id": upsert_data.assigned_project,
+                    }
+                    if "system" not in session["acl"]
+                    else {"id": upsert_data.assigned_project}
+                ),
             ):
                 raise ValueError("assigned_project", "Project is not accessible")
 
@@ -192,7 +196,7 @@ async def patch_object(object_type: str, object_id: str | None = None):
     object_ids = request._objects.keys()
     patch_data = model_meta["objects"]["patch"][object_type](**request.form_parsed)
 
-    if not "system" in session["acl"]:
+    if "system" not in session["acl"]:
         for f in model_meta["objects"]["system_fields"][object_type]:
             if hasattr(patch_data, f):
                 setattr(patch_data, f, None)
@@ -213,7 +217,7 @@ async def patch_object(object_type: str, object_id: str | None = None):
                 )
 
             # Check for project access
-            if not "system" in session["acl"]:
+            if "system" not in session["acl"]:
                 if (
                     hasattr(patch_data, "assigned_project")
                     and patch_data.assigned_project

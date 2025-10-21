@@ -7,9 +7,10 @@ from .blueprints import root, auth, objects, profile, system, users, groups, pro
 from quart import Quart, request, session
 from components.web.utils.notifications import validation_error, trigger_notification
 from components.web.utils.utils import build_nested_dict, ws_htmx
+from components.database import db
 from components.database.states import STATE
 from components.cluster.exceptions import ClusterException
-from components.models import model_forms
+from components.models.forms import model_forms
 from components.utils.misc import ensure_list
 from components.utils.lang import LANG
 from config import defaults
@@ -84,11 +85,12 @@ async def before_request():
 
     if session.get("id") and session["id"] in STATE.promote_users:
         STATE.promote_users.discard(session["id"])
-        user = await get(user_id=session["id"])
-        if "system" not in user.acl:
-            user.acl.append("system")
-            session["acl"] = user.acl
-            STATE.session_validated.update({session["id"]: user.acl})
+        async with db:
+            user = await db.get("users", session["id"])
+            if "system" not in ensure_list(user["acl"]):
+                user.acl.append("system")
+                session["acl"] = user.acl
+                STATE.session_validated.update({session["id"]: user.acl})
 
     if request.method in ["POST", "PATCH", "PUT", "DELETE"]:
         await modifying_request_limiter.acquire()

@@ -1,17 +1,16 @@
 import json
 
 from .requests import async_request, sync_request
+from components.database.states import STATE
 from components.logs import logger
 from config.defaults import HOSTNAME, OSM_EMAIL
-from components.database.states import STATE
+from urllib.parse import urlencode, quote_plus
 
 
 class CoordsResolver:
     def __init__(self, coords: str):
         if not isinstance(coords, str):
-            raise ValueError(
-                f"'coords' must be a string, but got {type(coords).__name__}."
-            )
+            raise ValueError(f"'coords' must be a string, got {type(coords).__name__}.")
 
         try:
             lat_str, lon_str = coords.split(",")
@@ -68,31 +67,51 @@ class CoordsResolver:
             return None
 
 
-async def display_name_to_location(q: str) -> dict:
+async def display_name_to_location(q: str | dict) -> dict:
     from components.database.states import STATE
 
-    if not isinstance(q, str):
-        raise ValueError(f"'q' must be a string, but got {type(q).__name__}.")
+    if not isinstance(q, (str, dict)):
+        raise ValueError(f"'q' must be a string or dict, got {type(q).__name__}.")
 
-    if q in STATE.locations:
-        return STATE.locations[q]
+    if not q:
+        raise ValueError("'q' must not be empty")
+
+    data = {
+        "email": OSM_EMAIL,
+        "format": "json",
+        "limit": 1,
+    }
+
+    if isinstance(q, dict):
+        for attr in q:
+            if q[attr] is not None and attr in ["country", "city", "street"]:
+                clean_text = q[attr].strip()
+                if clean_text:
+                    data[attr] = clean_text
     else:
-        try:
-            result = {}
-            status_code, response_text = await async_request(
-                f"https://nominatim.openstreetmap.org/search?q={q}&limit=1&format=json&email={OSM_EMAIL}",
-                "GET",
-                headers={
-                    "User-Agent": f"display_name_to_location() - Thank you! - Contact: {OSM_EMAIL}",
-                    "Referer": f"https://{HOSTNAME}",
-                },
-            )
-            if status_code == 200:
-                response_text = json.loads(response_text)
+        data["q"] = q.strip()
 
-                if response_text:
-                    result = response_text[0]
-                    STATE.locations[q] = result
+    query_string = urlencode(data, quote_via=quote_plus)
 
-        finally:
+    if query_string in STATE.locations:
+        return STATE.locations[query_string]
+    else:
+        result = {}
+        status_code, response_text = await async_request(
+            f"https://nominatim.openstreetmap.org/search?{query_string}",
+            "GET",
+            headers={
+                "User-Agent": f"display_name_to_location() - Thank you! - Contact: {OSM_EMAIL}",
+                "Referer": f"https://{HOSTNAME}",
+            },
+        )
+        if status_code == 200:
+            response_text = json.loads(response_text)
+
+            if response_text:
+                result = response_text[0]
+                STATE.locations[query_string] = result
+
             return result
+
+        return result

@@ -5,13 +5,14 @@ import base64
 import json
 import socket
 import zlib
-from ipaddress import IPv4Address, IPv6Address
 
 from components.cluster.ssl import get_ssl_context
+from components.database import db
+from components.database.database import SYNC_PAYLOAD_FORMAT_VERSION
 from components.logs import logger
 from components.models.cluster import ConnectionStatus, LocalPeer, RemotePeer, Role
-from components.utils.misc import ensure_list
 from config import defaults
+from ipaddress import IPv6Address
 
 # Constants
 QUORUM_PERCENTAGE = 0.51  # 51% required for leader election
@@ -173,9 +174,6 @@ class Peers:
 
     async def _fan_out_db(self):
         """Synchronize database to all peers when leader and cluster is complete."""
-        from components.database import db
-        from components.database.database import SYNC_PAYLOAD_FORMAT_VERSION
-
         try:
             async with db:
                 payload = await self._build_db_sync_payload(
@@ -184,8 +182,6 @@ class Peers:
 
                 raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
                 b64 = base64.b64encode(zlib.compress(raw)).decode("ascii")
-
-                await db.sync_in(b64)
 
                 for peer in self.remotes:
                     await self.cluster.send_command(

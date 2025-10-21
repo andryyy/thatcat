@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from components.models.helpers import *
+from components.models.helpers import to_int, to_str
 
 
 @dataclass
@@ -7,6 +7,8 @@ class Location:
     lat: float | str
     lon: float | str
     display_name: str | None = None
+    radius: int | str = 100
+    zoom: int | str = 12
 
     @property
     def coords(self) -> str:
@@ -17,7 +19,7 @@ class Location:
         try:
             lat_str, lon_str = coords.split(",")
             return cls(lat=float(lat_str), lon=float(lon_str), display_name="")
-        except (ValueError, TypeError) as e:
+        except (ValueError, TypeError):
             raise ValueError(f"Invalid coordinate string: {coords}")
 
     def __post_init__(self):
@@ -32,6 +34,9 @@ class Location:
                 "lon",
                 f"'lon' must be a non-empty float or string, got {type(self.lon).__name__}",
             )
+
+        self.radius = to_int(self.radius)
+        self.zoom = to_int(self.zoom)
 
         if self.display_name is not None:
             self.display_name = to_str(self.display_name.strip()) or None

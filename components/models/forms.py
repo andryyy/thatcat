@@ -1,29 +1,24 @@
-import pkgutil
-import importlib
-import inspect
-import pathlib
-
-models_dir = pathlib.Path(__file__).parent
-
-__all__ = ["model_forms", "model_meta"]
-
-for module_info in pkgutil.iter_modules([str(models_dir)]):
-    if module_info.ispkg:
-        continue
-    module_name = (
-        f"{__package__}.{module_info.name}"
-        if __package__
-        else f"components.models.{module_info.name}"
-    )
-    module = importlib.import_module(module_name)
-    for name, obj in inspect.getmembers(module):
-        if inspect.isclass(obj) and hasattr(obj, "__dataclass_fields__"):
-            __all__.append(name)
-            globals()[name] = obj
-
-
 model_forms = {
     "objects": {
+        "processings": {
+            "vin": {
+                "title": "VIN (Vehicle Identification Number)",
+                "description": "The vehicle's identification number",
+                "type": "text",
+                "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
+            },
+            "assigned_project": {
+                "title": "Assigned Project",
+                "description": "Assign this car to a project.",
+                "type": "project",
+                "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
+            },
+            "assets": {
+                "title": "Assets",
+                "description": "Associated files",
+                "type": "assets",
+            },
+        },
         "projects": {
             "name": {
                 "title": "Name",
@@ -38,7 +33,6 @@ model_forms = {
                 "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
             },
             "location": {"title": "Location", "type": "location"},
-            "radius": {"title": "Location Radius", "type": "number"},
             "notes": {
                 "title": "Notes",
                 "vault": "true",
@@ -138,42 +132,24 @@ model_forms = {
     },
     "system": {
         "settings": {
-            "GOOGLE_VISION_API_KEY": {
-                "title": "Google Vision API",
-                "description": "API key for Google Vision",
+            "claude_api_key": {
+                "title": "Claude API key",
+                "description": "Claude API key",
                 "type": "text",
                 "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
-            }
+            },
+            "claude_model": {
+                "title": "Claude API model",
+                "description": "Claude API model",
+                "type": "text",
+                "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
+            },
+            "google_vision_api_key": {
+                "title": "Google Vision API key",
+                "description": "Google Vision API key",
+                "type": "text",
+                "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
+            },
         }
     },
-}
-
-model_meta = {
-    "objects": {
-        "types": ["cars", "projects"],
-        "patch": {
-            "cars": ObjectPatchCar,
-            "projects": ObjectPatchProject,
-        },
-        "add": {
-            "cars": ObjectAddCar,
-            "projects": ObjectAddProject,
-        },
-        "base": {
-            "cars": ObjectCar,
-            "projects": ObjectProject,
-        },
-        "unique_fields": {  # str only
-            "cars": ["vin", "assigned_project"],
-            "projects": ["name"],
-        },
-        "display_name": {
-            "cars": "vin",
-            "projects": "name",
-        },
-        "system_fields": {
-            "cars": ["assigned_users"],
-            "projects": ["assigned_users"],
-        },
-    }
 }

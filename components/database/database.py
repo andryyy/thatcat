@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-import asyncio, json, zlib, base64, contextvars
+import asyncio
+import json
+import zlib
+import base64
+import contextvars
 
 from collections import OrderedDict
 from components.cluster.exceptions import ClusterException
@@ -37,7 +41,7 @@ SYNC_PAYLOAD_FORMAT_VERSION = 2
 _DEFAULT_LIST_ROW_FIELDS = ["id", "created", "updated", "doc_version"]
 LIST_ROW_FIELDS = {
     "users": _DEFAULT_LIST_ROW_FIELDS + ["login"],
-    "projects": _DEFAULT_LIST_ROW_FIELDS + ["name", "assigned_users"],
+    "projects": _DEFAULT_LIST_ROW_FIELDS + ["name", "assigned_users", "location"],
     "cars": _DEFAULT_LIST_ROW_FIELDS + ["vin", "assigned_users", "assigned_project"],
     "processings": _DEFAULT_LIST_ROW_FIELDS + ["assigned_user"],
 }
@@ -47,7 +51,7 @@ INDEX_FIELDS = {
     "cars": ["id", "vin", "assigned_users", "assigned_project"],
     "projects": ["id", "name", "assigned_users"],
     "users": ["id", "login", "credentials.id", "acl"],
-    "processings": ["id", "assigned_user"],
+    "processings": ["id", "assigned_user", "assets.id"],
 }
 
 _changed_ctx = contextvars.ContextVar("_changed_ctx", default={})
@@ -210,7 +214,7 @@ class Database:
                 _, comp_b64 = comp_sync.split(" ", 1)
                 for peer in cluster_peers:
                     await self.cluster.send_command(
-                        f"DBSYNC LAZY {comp_b64}", peer, raise_err=True
+                        f"DBSYNC BLOCK {comp_b64}", peer, raise_err=True
                     )
         except Exception as e:
             logger.critical(e)
@@ -663,7 +667,7 @@ class Database:
         """Encode a sync payload to compressed base64 string."""
         raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         b64 = base64.b64encode(zlib.compress(raw)).decode("ascii")
-        return "DBSYNC LAZY " + b64
+        return "DBSYNC BLOCK " + b64
 
     async def sync_out(self) -> Optional[str]:
         if not self._has_pending_changes():
@@ -703,8 +707,8 @@ class Database:
     def _decode_sync_payload(self, data_b64: str) -> Dict[str, Any]:
         """Decode and validate a sync payload."""
         # Strip DBSYNC prefix if present
-        if data_b64.startswith("DBSYNC LAZY "):
-            data_b64 = data_b64[len("DBSYNC LAZY ") :]
+        if data_b64.startswith("DBSYNC BLOCK "):
+            data_b64 = data_b64[len("DBSYNC BLOCK ") :]
 
         if not isinstance(data_b64, str):
             raise TypeError("sync_in expects a base64 string (without 'SYNC ' prefix)")
@@ -821,7 +825,7 @@ class Database:
     async def _do_ops(
         self,
         table: str,
-        kind: Literal["delete", "upsert", "patch"],
+        kind: str,
         id_: str,
         doc: Optional[JSON],
         replace: bool,
@@ -832,7 +836,7 @@ class Database:
 
         try:
             locks = _locks_ctx.get()
-            if not id_ in locks:
+            if id_ not in locks:
                 locks[id_] = await self.cluster.acquire_lock([id_])
                 _locks_ctx.set(locks)
         except Exception as e:

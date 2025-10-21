@@ -86,35 +86,14 @@
 </nav>
 
 <div class="grid-space-between">
+  <div>
   {% if session["login"] %}
-  <a href="" id="vault-dialog-toggle" class="color-zinc-800 shine"
-    _="on click halt the event add @open to #vault-dialog call (first .vault-unlock-pin in #vault-dialog).focus() end">
-    {{ L["Vault loading"] }}...
-  </a>
-  <dialog id="vault-dialog" _="install vaultDialog">
-  <article>
-    <p class="grid-space-between">
-      <b>{{ L["Vault"] }}</b>
-      <a href="#" _="on click halt the event remove @open from closest <dialog/>">{{ L["Close"] }}</a>
-    </p>
-    <hr>
-    <fieldset id="vault-unlock-fieldset">
-      <label>{{ L["Vault password"] }}</label>
-      <input hx-disable
-        class="vault-unlock-pin"
-        name="vault-unlock-pin"
-        type="password"
-        autocomplete="off"
-        autocorrect="off"
-        data-protonpass-ignore="true"
-        autocapitalize="off"
-        spellcheck="false"/>
-      <small>{{ L["Your vault will be kept unlocked until you refresh the window or lock it"] }}</small>
-    </fieldset>
-    <button class="vault-unlock" data-vault='{{ session.profile.vault or "" }}'>...</button>
-  </article>
-  </dialog>
+    <a href="" id="vault-dialog-toggle" class="color-zinc-800 shine"
+      _="on click halt the event add @open to #vault-dialog call (first .vault-unlock-pin in #vault-dialog).focus() end">
+      {{ L["Vault loading"] }}...
+    </a>
   {% endif %}
+  </div>
   <div id="nav-meta" class="small">
     <span>
       {% if session["login"] %}{{ L["Connection"] }}:{% endif %}
@@ -126,7 +105,6 @@
       _="init
           trigger updateTheme
         end
-
         on updateTheme
             if not localStorage.theme
               if window.matchMedia('(prefers-color-scheme: light)').matches
@@ -138,7 +116,6 @@
               toggleLight(localStorage.theme)
             end
         end
-
         on click
           halt the event
           if I match .light
@@ -147,7 +124,6 @@
             toggleLight('light')
           end
         end
-
         def toggleLight(mode)
           if mode == 'dark'
             set (@data-theme of <html/>) to 'dark'
@@ -166,3 +142,29 @@
     </span>
   </div>
 </div>
+
+{% if session["login"] %}
+<dialog id="vault-dialog" _="install vaultDialog">
+<article>
+  <p class="grid-space-between">
+    <b>{{ L["Vault"] }}</b>
+    <a href="#" _="on click halt the event remove @open from closest <dialog/>">{{ L["Close"] }}</a>
+  </p>
+  <hr>
+  <fieldset id="vault-unlock-fieldset">
+    <label>{{ L["Vault password"] }}</label>
+    <input hx-disable
+      class="vault-unlock-pin"
+      name="vault-unlock-pin"
+      type="password"
+      autocomplete="off"
+      autocorrect="off"
+      data-protonpass-ignore="true"
+      autocapitalize="off"
+      spellcheck="false"/>
+    <small>{{ L["Your vault will be kept unlocked until you refresh the window or lock it"] }}</small>
+  </fieldset>
+  <button class="vault-unlock" data-vault='{{ session.profile.vault or "" }}'>...</button>
+</article>
+</dialog>
+{% endif %}

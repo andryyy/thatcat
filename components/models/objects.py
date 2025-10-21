@@ -1,13 +1,18 @@
-from components.models.helpers import *
 from components.models.assets import Asset
 from components.models.coords import Location
+from components.models.helpers import (
+    to_asset_from_str,
+    to_bool,
+    to_int,
+    to_location,
+    to_str,
+    validate_uuid_str,
+)
 from components.utils.datetimes import utc_now_as_str
 from components.utils.misc import ensure_list, unique_list
-from components.utils.vins import VinTool
-from dataclasses import dataclass, field, fields, asdict, replace
-from quart.sessions import SecureCookieSession
-from uuid import uuid4
+from dataclasses import asdict, dataclass, field, fields, replace
 from typing import Protocol
+from uuid import uuid4
 
 
 @dataclass
@@ -45,7 +50,6 @@ class ObjectProjectData:
     name: str
     assigned_users: list[str] | str
     location: Location | dict | None = None
-    radius: int | str | None = 100
     notes: str | None = None
 
 
@@ -118,7 +122,6 @@ class ObjectProject(ObjectProjectData, BaseObjectTemplate):
     def __post_init__(self) -> None:
         self.id = validate_uuid_str(self.id)
         self.doc_version = to_int(self.doc_version)
-        self.radius = to_int(self.radius)
 
         if not isinstance(self.created, str) or to_str(self.created.strip()) == "":
             raise ValueError("created", "'created' must be a non-empty string")
@@ -158,6 +161,8 @@ class ObjectCar(ObjectCarData, BaseObjectTemplate):
         return self.vin
 
     def __post_init__(self) -> None:
+        from components.utils.vins.processor import VINProcessor
+
         self.id = validate_uuid_str(self.id)
         self.doc_version = to_int(self.doc_version)
         self.year = to_int(self.year)
@@ -185,7 +190,7 @@ class ObjectCar(ObjectCarData, BaseObjectTemplate):
                 f"'vin' must be non-empty string, got {type(self.vin).__name__}",
             )
         self.vin = to_str(self.vin.strip())
-        if not VinTool.verify_checksum(self.vin):
+        if not VINProcessor.validate_vin(self.vin):
             raise ValueError("vin", "'vin' is not a valid VIN")
 
         if self.vendor is not None and not isinstance(self.vendor, str):
@@ -238,3 +243,34 @@ class ObjectCar(ObjectCarData, BaseObjectTemplate):
                             "All items in 'assets' must be of type Asset, dict or JSON string",
                         )
                 self.assets = assets
+
+
+model_meta = {
+    "objects": {
+        "types": ["cars", "projects"],
+        "patch": {
+            "cars": ObjectPatchCar,
+            "projects": ObjectPatchProject,
+        },
+        "add": {
+            "cars": ObjectAddCar,
+            "projects": ObjectAddProject,
+        },
+        "base": {
+            "cars": ObjectCar,
+            "projects": ObjectProject,
+        },
+        "unique_fields": {  # str only
+            "cars": ["vin", "assigned_project"],
+            "projects": ["name"],
+        },
+        "display_name": {
+            "cars": "vin",
+            "projects": "name",
+        },
+        "system_fields": {
+            "cars": ["assigned_users"],
+            "projects": ["assigned_users"],
+        },
+    }
+}

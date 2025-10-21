@@ -3,10 +3,12 @@ from quart import abort, redirect, request, session, url_for, websocket
 from components.database import db
 from components.database.states import STATE
 from components.logs import logger
-from components.models import *
+from components.models.users import User, USER_ACLS, UserSession
+from components.models.objects import model_meta
 from components.utils.misc import ensure_list, unique_list
 from config import defaults
 from functools import wraps
+from dataclasses import asdict
 
 
 class AuthException(Exception):
@@ -32,8 +34,6 @@ def session_clear(preserved_keys: list = []) -> None:
 
 
 async def verify_session(acl: str | list) -> None:
-    from components.models.users import USER_ACLS
-
     acls = unique_list(ensure_list(acl))
 
     if not session.get("id"):
@@ -44,16 +44,16 @@ async def verify_session(acl: str | list) -> None:
 
     for acl in acls:
         if session["id"] not in STATE.session_validated:
-            try:
-                async with db:
-                    user = await db.get("users", session["id"])
-                    user = User(**user)
+            async with db:
+                user = await db.get("users", session["id"])
 
-                STATE.session_validated.update({session["id"]: user.acl})
-                session["acl"] = user.acl
-            except:
+            if not user:
                 session_clear()
                 raise AuthException("User unknown")
+
+            user = User(**user)
+            STATE.session_validated.update({session["id"]: user.acl})
+            session["acl"] = user.acl
 
         if acl == "any" or acl in STATE.session_validated[session["id"]]:
             break
@@ -67,16 +67,17 @@ async def create_session_by_token(token):
 
     token_user, token_value = token.split(":")
 
-    try:
-        async with db:
-            user = await db.search(
-                "users",
-                {"login": token_user},
-            )
-            user = User(**user[0])
-    except:
+    async with db:
+        user = await db.search(
+            "users",
+            {"login": token_user},
+        )
+
+    if not user:
         session_clear()
         raise AuthException("User unknown")
+
+    user = User(**user[0])
 
     if token_value not in user.profile.access_tokens:
         raise AuthException("Token unknown in user context")
@@ -101,19 +102,19 @@ def websocket_acl(acl_type):
             try:
                 await verify_session(acl_type)
 
-                if not session["login"] in STATE.ws_connections:
+                if session["login"] not in STATE.ws_connections:
                     STATE.ws_connections[session["login"]] = dict()
 
                 if (
-                    not websocket._get_current_object()
-                    in STATE.ws_connections[session["login"]]
+                    websocket._get_current_object()
+                    not in STATE.ws_connections[session["login"]]
                 ):
                     STATE.ws_connections[session["login"]][
                         websocket._get_current_object()
                     ] = dict()
 
                 return await fn(*args, **kwargs)
-            except AuthException as e:
+            except AuthException:
                 abort(401)
             finally:
                 if "login" in session:
@@ -173,7 +174,7 @@ def formoptions(options: list):
             request.form_options = dict()
 
             for option in options:
-                if option == "users" and not "system" in session["acl"]:
+                if option == "users" and "system" not in session["acl"]:
                     continue
 
                 if option == "users":

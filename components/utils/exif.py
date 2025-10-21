@@ -1,6 +1,6 @@
 import math
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image
 from PIL.ExifTags import GPSTAGS, TAGS
 from io import BytesIO
 

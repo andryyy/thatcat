@@ -1,7 +1,7 @@
-from quart import Blueprint, render_template
+from quart import Blueprint, render_template, request
 from components.web.utils.wrappers import acl
 from components.database import db
-from components.models import UserGroups
+from components.models.users import UserGroups
 
 
 blueprint = Blueprint("groups", __name__, url_prefix="/groups")

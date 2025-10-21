@@ -10,6 +10,9 @@
     xl: (breakpoint: 1280px, viewport: 90%),
     xxl: (breakpoint: 1536px, viewport: 85%)
   ),
+  $modules: (
+    "layout/grid": false
+  )
 );
 @use "colors" as *;
 @use "sass:map";
@@ -95,7 +98,15 @@
   --pico-form-element-spacing-vertical: .5rem;
   --pico-form-element-spacing-horizontal: .5rem;
   --pico-font-size: 12pt;
-  --pico-line-height: 1.4;
+  --pico-line-height: 1.3;
+  --pico-border-radius: 0.25rem;
+  --pico-typography-spacing-vertical: 1.5rem;
+  --pico-grid-column-gap: calc(var(--pico-spacing)/2);
+  --pico-grid-row-gap: calc(var(--pico-spacing)/2);
+}
+
+[type=search] {
+  --pico-border-radius: 0.5rem;
 }
 
 $sm-breakpoint: map.get(map.get($breakpoints, sm), breakpoint);
@@ -103,6 +114,7 @@ $md-breakpoint: map.get(map.get($breakpoints, md), breakpoint);
 $lg-breakpoint: map.get(map.get($breakpoints, lg), breakpoint);
 $xl-breakpoint: map.get(map.get($breakpoints, xl), breakpoint);
 $xxl-breakpoint: map.get(map.get($breakpoints, xxl), breakpoint);
+
 
 .encrypted-field {
   font-family: monospace;
@@ -125,6 +137,18 @@ $xxl-breakpoint: map.get(map.get($breakpoints, xxl), breakpoint);
     background-clip: text;
     -webkit-text-fill-color: transparent;
 }
+
+body.dialog-open {
+  overflow: hidden;
+}
+
+.input-select > label {
+  background: var(--pico-card-background-color);
+  border-radius: .25rem;
+  padding: var(--pico-spacing);
+  cursor: pointer;
+}
+
 
 .small,
 small {
@@ -175,6 +199,7 @@ nav[aria-label="breadcrumb"] span {
   margin: var(--pico-spacing) 0;
 }
 .leaflet-control-zoom a {
+  all: revert;
   --pico-border-color: none;
   --pico-background-color: none;
   padding: inherit !important;
@@ -368,23 +393,17 @@ dialog div {
   white-space: break-spaces;
 }
 
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  column-gap: var(--pico-grid-column-gap);
+  row-gap: var(--pico-grid-row-gap);
+}
 .grid.split-grid > * {
   grid-column: span 3;
 }
 .grid.split-grid > *:first-child {
   grid-column: span 1;
-}
-.grid-center {
-  display: grid;
-  place-items: center
-}
-.grid-end {
-  display: grid;
-  justify-content: end;
-  grid-auto-columns: max-content;
-  grid-auto-flow: column;
-  gap: calc(var(--pico-spacing)/2);
-  align-items: center;
 }
 .grid-space-between {
   display: grid;
@@ -392,7 +411,16 @@ dialog div {
   grid-auto-columns: auto;
   grid-auto-flow: column;
   gap: calc(var(--pico-spacing)/2);
-  align-items: center;
+  align-items: baseline;
+  margin: calc(var(--pico-spacing) /2) auto;
+}
+.grid-stretch {
+  display: grid;
+  justify-content: stretch;
+  grid-auto-columns: auto;
+  grid-auto-flow: column;
+  gap: calc(var(--pico-spacing)/2);
+  align-items: baseline;
   margin: calc(var(--pico-spacing) /2) auto;
 }
 .grid-auto-cols {
@@ -465,6 +493,12 @@ hgroup ol, hgroup ul {
   }
   th, td {
     --pico-spacing: 0.75rem;
+  }
+}
+@media (min-width: $md-breakpoint) {
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(0%, 1fr));
   }
 }
 @media only screen and (max-width: $sm-breakpoint) {

@@ -16,46 +16,42 @@
 <h5>Fotos und Dateien importieren </h5>
 
 <section>
-  <article>
-    <p>Wähle ein oder mehrere Fotos aus, um mit dem Import fortzufahren.</p>
-    <form hx-target="#tasks"
+  <div class="input-select grid-stretch" _="on click from <label/> in me
+      call #tasks-form.reset()
+      if event.target's @data-value is 'text-input' remove @hidden
+        remove @hidden from #text-input
+      else
+        add @hidden to #text-input
+      end
+    end">
+    <label for="camera-file-input" data-value="camera-input">
+        📷 {{ L["Open camera"] }}
+    </label>
+    <label for="data-file-input" data-value="file-input">
+      📄 {{ L["Upload file/s"] }}
+    </label>
+    <label data-value="text-input">
+      📝 {{ L["Enter text"] }}
+    </label>
+  </div>
+
+  <section>
+    <form id="tasks-form" hx-target="#tasks"
       hx-swap="innerHTML"
       hx-encoding="multipart/form-data"
-      hx-post="/processings/upload/process"
-      _="on htmx:xhr:progress(loaded, total) from me set #progress.value to (loaded/total)*100">
-      <fieldset data-loading-disable>
-        <label>Ein Foto erfassen</label>
-        {% set ua = request.headers.get("User-Agent", "")|lower  %}
-        {% if "firefox" in ua and "android" in ua %}
-        <input type="file" multiple name="images">
-        {% else %}
-        <input type="file" multiple accept="image/*" capture="environment" name="images">
-        {% endif %}
-      </fieldset>
-
-      <fieldset data-loading-disable>
-        <label>Eine sonstige Datei erfassen</label>
-        <input type="file" multiple accept=".xlsx, .xls, .csv, .txt" name="files">
-      </fieldset>
-
-      <fieldset data-loading-disable>
-        <label>Eine URL erfassen (Google Sheets, etc. ...)</label>
-        <input type="text" name="urls">
-      </fieldset>
-
-      <button data-loading-disable type="submit">Hochladen</button>
-
-      <p _="on htmx:xhr:loadstart from closest <form/>
-        remove @hidden from me
-      end
-      on htmx:xhr:loadend from closest <form/> or htmx:xhr:abort from closest <form/>
-        add @hidden to me
-        set #progress.value to 0
-      end" hidden>
-        <progress id="progress" value="0" max="100"></progress>
-      </p>
+      hx-post="/processings/upload/process">
+      <input id="camera-file-input" type="file" multiple accept="image/*" capture="environment" name="images" hidden _="on change trigger submit on closest <form/> end">
+      <input id="data-file-input" type="file" multiple accept="*" name="files" hidden _="on change trigger submit on closest <form/> end">
+      <article id="text-input" hidden>
+        <fieldset data-loading-disable>
+          <label>📝 {{ L["Enter text"] }}</label>
+          <textarea name="text_data" rows="10" placeholder="VIN-Nummern oder Text hier einfügen..."></textarea>
+          <button data-loading-disable type="submit">{{ L["Process text"] }}</button>
+        </fieldset>
+      </article>
+      <div _="install xhrProgress" hidden></div>
     </form>
-  </article>
+  </section>
 
   <div id="tasks" hx-swap="innerHTML" hx-get="/processings/tasks" hx-trigger="load once">
     <article aria-busy="true">Lade Aufgaben...</article>

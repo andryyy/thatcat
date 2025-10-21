@@ -5,9 +5,8 @@ from components.web.utils.utils import render_or_json
 from components.web.utils.tables import table_search_helper
 from components.database import db
 from components.database.states import STATE
-from components.models import User, CredentialPatch, UserPatch
-from components.models.users import USER_ACLS
-from components.utils.misc import batch, ensure_list
+from components.models.users import USER_ACLS, User, UserPatch, CredentialPatch
+from components.utils.misc import ensure_list
 from dataclasses import asdict, replace
 
 
@@ -98,7 +97,7 @@ async def delete_user(user_id: str | None = None):
 @blueprint.route("/<user_id>/credential/<hex_id>", methods=["PATCH"])
 @acl("any")
 async def patch_user_credential(user_id: str, hex_id: str):
-    if not "system" in session["acl"]:
+    if "system" not in session["acl"]:
         user_id = session["id"]
 
     async with db:
@@ -143,7 +142,7 @@ async def patch_user_credential(user_id: str, hex_id: str):
 @blueprint.route("/<user_id>/credential/<hex_id>", methods=["DELETE"])
 @acl("any")
 async def delete_user_credential(user_id: str, hex_id: str):
-    if not "system" in session["acl"]:
+    if "system" not in session["acl"]:
         user_id = session["id"]
 
     async with db:
@@ -197,5 +196,5 @@ async def patch_user(user_id: str | None = None):
         level="success",
         response_code=204,
         title="User modified",
-        message=f"User was updated",
+        message="User was updated",
     )

@@ -1,16 +1,16 @@
-behavior selectFromLeaflet(formId, options)
+behavior selectFromLeaflet(formId, loc)
   init
-    put `<mark style="display: none" id="leaflet-project-name-${formId}"></mark>` into #{'leaflet-map-' + formId}
+    put `<mark class="hidden leaflet-project-name"></mark>` into .leaflet-map in me
     set :markers to {}
-    if not options.coords
+    if not loc
       call drawMap(0.0, 0.0, 1)
     else
-      call drawMap(options.coords.lat, options.coords.lon, options.coords.zoom or 12)
+      call drawMap(loc.lat, loc.lon, loc.zoom or 12)
       trigger freeze
     end
-    trigger afterDraw on #{'leaflet-current-position-' + formId}
+    trigger afterDraw on .leaflet-current-position in me
     call fitToMarkers()
-    hide #{'leaflet-loading-' + formId}
+    hide .leaflet-loading in me
   end
 
   on htmx:beforeHistorySave from body
@@ -22,8 +22,12 @@ behavior selectFromLeaflet(formId, options)
   end
 
   on unfreeze
-    set options.frozen to false
-    remove @disabled from #{'leaflet-search-query-' + formId}
+    set :frozen to false
+    set *cursor to 'inherit'
+    remove @disabled from .leaflet-search-query in me
+    remove @disabled from .leaflet-current-position in me
+    remove @disabled from <input/> in .leaflet-additional-markers in me
+    remove @disabled from .input-radius in me
     call :map.dragging.enable()
     call :map.touchZoom.enable()
     call :map.doubleClickZoom.enable()
@@ -33,10 +37,18 @@ behavior selectFromLeaflet(formId, options)
   end
 
   on freeze
-    call setPos(options.coords.lat, options.coords.lon, options.coords.display_name, true)
-    set options.frozen to true
-    add @disabled to #{'leaflet-search-query-' + formId}
-    put options.coords.display_name into #{'leaflet-marker-name-' + formId}
+    set :frozen to true
+    set *cursor to 'not-allowed'
+    call setPos(loc.lat, loc.lon, loc.display_name, true)
+    if :currentPositionMarker
+      call :map.removeLayer(:currentPositionMarker)
+      set :currentPositionMarker to null
+    end
+    add @disabled to .leaflet-search-query in me
+    add @disabled to .leaflet-current-position in me
+    add @disabled to <input/> in .leaflet-additional-markers in me
+    add @disabled to .input-radius in me
+    put loc.display_name into .leaflet-marker-name in me
     call :map.dragging.disable()
     call :map.touchZoom.disable()
     call :map.doubleClickZoom.disable()
@@ -45,54 +57,76 @@ behavior selectFromLeaflet(formId, options)
     call :map.keyboard.disable()
   end
 
-  on keydown[keyCode == 13] from #{'leaflet-search-query-' + formId} throttled at 1s
+  on keydown[keyCode == 13] from (.leaflet-search-query in me) throttled at 1s queue none
     halt the event's bubbling
+    add @disabled to event.target
     set searchQuery to event.target's value
     if searchQuery
       fetch `/location/search/${searchQuery}` with method:'GET', headers:{content-type:'application/json'}
       set res to result as Object
-      call setPos(res.lat, res.lon, res.display_name, true) unless not result
+      if Object.keys(res).length
+        call setPos(res.lat, res.lon, res.display_name, true)
+      else
+        add .shake to event.target settle remove .shake from event.target
+      end
     end
+    remove @disabled from event.target
   end
 
-  on change from <input[type=checkbox]/> in #{'leaflet-additional-markers-' + formId}
+  on change from <input[type=checkbox]/> in .leaflet-additional-markers in me
     set markerId to (event.target's @data-marker as Object).id
     remove .hidden from :markers[markerId]._path unless not event.target.checked
     add .hidden to :markers[markerId]._path unless event.target.checked
     call fitToMarkers()
   end
 
-  on click from #{'leaflet-current-position-' + formId} or afterDraw
-    put '' into #{'leaflet-current-accuracy-' + formId}
-    set @aria-busy of #{'leaflet-current-position-' + formId} to 'true'
+  on click from (.leaflet-current-position in me) or afterDraw
+    if event.type is 'click'
+      halt the event
+      if :frozen exit end
+    end
+    put '' into .leaflet-current-accuracy in me
+    set @aria-busy of (.leaflet-current-position in me) to 'true'
     call navigator.geolocation.getCurrentPosition(selfCoordsUpdate, logError, {
       enableHighAccuracy: true
     })
     wait for currentPosUpdated(pos) or 4 s
     if the result's type is 'currentPosUpdated'
-      put '~' + (pos.coords.accuracy as Int) + ' m' into #{'leaflet-current-accuracy-' + formId}
-      if event's type is 'click' or not options.coords
-        call :map.flyTo([pos.coords.latitude, pos.coords.longitude], 10)
+      put '~' + (pos.coords.accuracy as Int) + ' m' into .leaflet-current-accuracy in me
+      if event's type is 'click' or not loc
+        call :map.flyTo([pos.coords.latitude, pos.coords.longitude], 10, {duration: 0.35})
       end
     end
-    remove @aria-busy from #{'leaflet-current-position-' + formId}
+    remove @aria-busy from .leaflet-current-position in me
+  end
+
+  on click from .leaflet-lock in me
+    halt the event
+    toggle .locked on event.target
+    if event.target matches .locked
+      put '{{ L["Unlock"] }}' into event.target
+      trigger freeze
+    else
+      put '{{ L["Reset"] }}' into event.target
+      trigger unfreeze
+    end
   end
 
   def selfCoordsUpdate(pos)
     if :map
       if not :currentPositionMarker
-        if pos.coords.accuracy < 1000
-          call L.circle([pos.coords.latitude, pos.coords.longitude],{
-            color: 'red', weight: 1, interactive: false, fillColor: 'orangered', fillOpacity: 0.1, radius: (pos.coords.accuracy)
-          }).addTo(:map)
-            set :currentPositionMarker to result
-        end
+        set accuracy to pos.coords.accuracy
+        if accuracy > 1000 set accuracy to 1000 end
+        call L.circle([pos.coords.latitude, pos.coords.longitude],{
+          color: 'orangered', weight: 1, interactive: false, fillColor: 'orangered', fillOpacity: 0.1, radius: (accuracy)
+        }).addTo(:map)
+          set :currentPositionMarker to result
       else
         call :currentPositionMarker.setLatLng([pos.coords.latitude, pos.coords.longitude])
         call :currentPositionMarker.setRadius(pos.coords.accuracy)
       end
     end
-    trigger currentPosUpdated(pos: pos) on #{'leaflet-current-position-' + formId}
+    trigger currentPosUpdated(pos: pos) on .leaflet-current-position in me
   end
 
   def fitToMarkers
@@ -108,7 +142,6 @@ behavior selectFromLeaflet(formId, options)
   end
 
   def setPos(lat, lon, name, flyTo)
-    if options.frozen exit end
     set name to '' unless name
     set flyTo to false unless flyTo
     if :selectionMarker
@@ -117,52 +150,64 @@ behavior selectFromLeaflet(formId, options)
       call L.marker([lat, lon], {bubblingMouseEvents: false, markerName: name}).addTo(:map).on('click', handleClick)
         set :selectionMarker to result
     end
-    call :map.flyTo([lat, lon], 12) unless not flyTo
-    put name into #{'leaflet-marker-name-' + formId}
-    set value of #{'leaflet-lat-' + formId} to lat
-    set value of #{'leaflet-lon-' + formId} to lon
-    set value of #{'leaflet-display-name-' + formId} to name
+    call :map.flyTo([lat, lon], 12, {duration: 0.35}) unless not flyTo
+    if name == ''
+      put '<span aria-busy="true"></span>' into .leaflet-marker-name in me
+      async do
+        fetch `/location/resolve/${lat},${lon}` as response with method:'GET', headers:{content-type:'application/json'}
+        if not result.ok and result.status == 425
+          trigger notification(level: 'error', title: '{{ L["Too fast"] }}', message: '{{ L["Too fast"] }}', duration: 1000)
+        end
+        set res to result.text() as String
+        put res into .leaflet-marker-name in me
+        set value of (.input-display-name in me) to res
+      end
+    end
+    set value of (.input-lat in me) to lat
+    set value of (.input-lon in me) to lon
+    set value of (.input-display-name in me) to name
   end
 
   def handleMouse(e)
     if e's type is 'mouseout'
-      hide #{'leaflet-project-name-' + formId}
-      put '' into #{'leaflet-project-name-' + formId}
+      add .hidden to .leaflet-project-name in me
+      put '' into .leaflet-project-name in me
     else
-      put e.target.options.projectName into #{'leaflet-project-name-' + formId}
-      show #{'leaflet-project-name-' + formId}
+      put '{{ L["Project"] }}: ' + e.target.options.projectName into .leaflet-project-name in me
+      remove .hidden from .leaflet-project-name in me
     end
   end
 
   def handleClick(e)
+    if :frozen exit end
     call setPos(e.latlng.lat, e.latlng.lng, '', false)
   end
 
   def drawMap(lat, lon, zoom)
-    call L.map(#{'leaflet-map-' + formId}).setView([lat, lon], zoom)
+    call L.map(first .leaflet-map in me).setView([lat, lon], zoom)
       set :map to result
     then call L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; OpenStreetMap'}).addTo(:map)
     then call :map.on('click', handleClick)
 
-    repeat for m in (<[data-marker]/> in #{'leaflet-additional-markers-' + formId}) index idx
+    repeat for m in (<.leaflet-additional-markers [data-marker]/>) in me index idx
       set markerData to (@data-marker of m) as Object
-      call L.circle([markerData.coords.lat, markerData.coords.lon], {
+      call L.circle([markerData.loc.lat, markerData.loc.lon], {
         projectName: markerData.name,
-        projectCoordsDisplayName: markerData.coords.display_name,
+        projectCoordsDisplayName: markerData.loc.display_name,
         color: '#1E90FF',
         weight: 1,
         fillColor: '#00BFFF',
         fillOpacity: 0.2,
-        radius: markerData.radius,
+        radius: markerData.loc.radius,
         bubblingMouseEvents: false,
         className: markerData.class
       }).addTo(:map)
         set :markers[markerData.id] to result
         call :markers[markerData.id].on('mouseover', handleMouse).on('mouseout', handleMouse)
     end
-    remove @hidden from #{'leaflet-controls-' + formId}
+    remove .hidden from .leaflet-controls in me
   end
 end
 

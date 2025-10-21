@@ -15,12 +15,14 @@ from quart import (
     websocket,
 )
 from components.web.utils.wrappers import acl, session_clear, websocket_acl
+from components.web.utils.ratelimiter import RateLimiter
 from components.cluster import cluster
 from components.cluster.files import FileGetException
 from components.database.states import STATE
 
-blueprint = Blueprint("main", __name__, url_prefix="/")
 HS_DIR = os.path.abspath("components/web/templates/_hs")
+blueprint = Blueprint("main", __name__, url_prefix="/")
+osm_ratelimiter = RateLimiter(rate=1, per=2)  # 1 request per 2 seconds
 
 
 class TerminateWebsocketTaskGroup(Exception):
@@ -47,13 +49,30 @@ async def hs_script(script_file: str):
 @blueprint.route("/location/search/<q>")
 @acl("user")
 async def location_lookup(q: str):
-    return await display_name_to_location(q)
+    query = {"country": None, "city": None, "street": None}
+    split_q = q.split(",")
+    if len(split_q) == 2:
+        query["city"], query["street"] = split_q
+    elif len(split_q) == 3:
+        query["country"], query["city"], query["street"] = split_q
+    else:
+        query = q
+    try:
+        async with asyncio.timeout(2):
+            return await display_name_to_location(query)
+    except TimeoutError:
+        return {}
 
 
 @blueprint.route("/location/resolve/<coords>")
 @acl("user")
 async def coords_resolver(coords: str):
-    return await CoordsResolver(coords).aresolve()
+    try:
+        async with asyncio.timeout(0.5):
+            await osm_ratelimiter.acquire()
+        return await CoordsResolver(coords).aresolve()
+    except TimeoutError:
+        return "", 425
 
 
 @blueprint.route("/asset/<asset_id>")
