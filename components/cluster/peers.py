@@ -155,11 +155,11 @@ class Peers:
             "tables": {},
         }
 
-        for table, doc_versions in db._manifest.get("tables", {}).items():
+        for table, table_dict in db._manifest.get("tables", {}).items():
             payload["tables"][table] = {
                 "docs": {},
                 "deleted_ids": [],
-                "doc_versions": doc_versions,
+                "doc_versions": table_dict.get("doc_versions", {}),
             }
 
             for doc_id in db._manifest["tables"][table].get("doc_versions", {}).keys():

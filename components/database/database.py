@@ -20,7 +20,7 @@ from components.logs import logger
 from components.utils.misc import ensure_list
 from functools import wraps
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Set, Tuple
 
 
 try:
@@ -303,7 +303,7 @@ class Database:
             ]
         )
 
-    async def get(self, table: str, id_: str) -> Optional[JSON]:
+    async def get(self, table: str, id_: str) -> JSON | None:
         key = (table, id_)
         cached = self._cache.get(key)
         if cached is not None:
@@ -324,7 +324,7 @@ class Database:
             self._cache.put(key, doc)
             return doc
 
-    async def _read_disk_nocache(self, table: str, id_: str) -> Optional[JSON]:
+    async def _read_disk_nocache(self, table: str, id_: str) -> JSON | None:
         path = self._resolve_doc_path(table, id_)
         if not path.exists():
             return None
@@ -342,7 +342,7 @@ class Database:
         doc: JSON,
         *,
         replace: bool = True,
-        base_version: Optional[int] = 0,
+        base_version: int | None = 0,
     ) -> None:
         if base_version != 0:
             if self.doc_version(table, id_) > base_version:
@@ -361,7 +361,7 @@ class Database:
         table: str,
         id_: str,
         changes: JSON,
-        base_version: Optional[int] = 0,
+        base_version: int | None = 0,
     ) -> None:
         if base_version != 0:
             if self.doc_version(table, id_) > base_version:
@@ -390,7 +390,7 @@ class Database:
         )
 
     def _update_indexes_for_doc_change(
-        self, table: str, *, id_: str, old_doc: Optional[JSON], new_doc: Optional[JSON]
+        self, table: str, *, id_: str, old_doc: JSON | None, new_doc: JSON | None
     ) -> None:
         """Update indexes when a document changes."""
         if table not in self._indexes:
@@ -433,7 +433,7 @@ class Database:
         doc: JSON,
         *,
         replace: bool,
-        incoming_version: Optional[int] = None,
+        incoming_version: int | None = None,
     ) -> None:
         lock = self._lock_for(table, id_)
         async with lock:
@@ -457,10 +457,11 @@ class Database:
             tmp = path.with_suffix(path.suffix + ".tmp")
             await asyncio.to_thread(tmp.write_bytes, data)
             await asyncio.to_thread(tmp.replace, path)
-
             t = self._tbl(table)
             if incoming_version is not None:
-                t["doc_versions"][id_] = incoming_version
+                if int(t["doc_versions"].get(id_, 0)) > int(incoming_version):
+                    raise ValueError("Local document version ahead")
+                t["doc_versions"][id_] = int(incoming_version)
             else:
                 t["doc_versions"][id_] = int(t["doc_versions"].get(id_, 0)) + 1
 
@@ -539,8 +540,8 @@ class Database:
     async def search(
         self,
         table: str,
-        where: Optional[Dict[str, Any]] = None,
-        limit: Optional[int] = None,
+        where: Dict[str, Any] | None = None,
+        limit: int | None = None,
     ) -> List[JSON]:
         """Search for documents matching a where clause.
 
@@ -554,7 +555,7 @@ class Database:
         """
         where = where or {}
         idxs = self._indexes.get(table, {})
-        candidate_ids: Optional[Set[str]] = None
+        candidate_ids: Set[str] | None = None
         unindexed_fields = []
 
         # Use indexes to narrow down candidates
@@ -669,7 +670,7 @@ class Database:
         b64 = base64.b64encode(zlib.compress(raw)).decode("ascii")
         return "DBSYNC BLOCK " + b64
 
-    async def sync_out(self) -> Optional[str]:
+    async def sync_out(self) -> str | None:
         if not self._has_pending_changes():
             return None
 
@@ -738,12 +739,12 @@ class Database:
     async def sync_in(
         self,
         data_b64: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         payload = self._decode_sync_payload(data_b64)
 
         applied_upserts = 0
         applied_deletes = 0
-        conflicts: List[Tuple[str, str, str]] = []
+        conflicts: list[tuple[str, str, str]] = []
 
         for table, entry in payload.get("tables", {}).items():
             # Process deletions
@@ -754,10 +755,14 @@ class Database:
                 except Exception as e:
                     conflicts.append((table, id_, f"delete: {e!s}"))
 
-            # Process upserts
+            # Process upserts - respect incoming versions from sync payload
+            doc_versions = entry.get("doc_versions", {})
             for id_, doc in entry.get("docs", {}).items():
                 try:
-                    await self._upsert_local(table, id_, doc, replace=True)
+                    incoming_version = doc_versions.get(id_)
+                    await self._upsert_local(
+                        table, id_, doc, replace=True, incoming_version=incoming_version
+                    )
                     applied_upserts += 1
                 except Exception as e:
                     conflicts.append((table, id_, f"upsert: {e!s}"))
@@ -770,16 +775,14 @@ class Database:
             "conflicts": conflicts,
         }
 
-    async def snapshot_docs(
-        self, table: str, ids: List[str]
-    ) -> Dict[str, Optional[JSON]]:
+    async def snapshot_docs(self, table: str, ids: List[str]) -> Dict[str, JSON | None]:
         snap = {}
         for id_ in ids:
             snap[id_] = await self.get(table, id_)
         return snap
 
     async def apply_snapshot(
-        self, table: str, snapshot: Dict[str, Optional[JSON]]
+        self, table: str, snapshot: Dict[str, JSON | None]
     ) -> None:
         for id_, doc in snapshot.items():
             if doc is None:
@@ -791,7 +794,7 @@ class Database:
                 await self._upsert_local(table, id_, d, replace=True)
 
     async def make_sync_from_docs(
-        self, tables_docs: Dict[str, Dict[str, Optional[JSON]]]
+        self, tables_docs: Dict[str, Dict[str, JSON | None]]
     ) -> str:
         payload = {
             "format": SYNC_PAYLOAD_FORMAT_VERSION,
@@ -827,9 +830,9 @@ class Database:
         table: str,
         kind: str,
         id_: str,
-        doc: Optional[JSON],
+        doc: JSON | None,
         replace: bool,
-        incoming_version: Optional[int],
+        incoming_version: int | None,
     ) -> None:
         if kind not in ["delete", "upsert", "patch"]:
             raise ValueError(f"Unknown op {kind}")

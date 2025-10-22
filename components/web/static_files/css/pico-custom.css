@@ -2979,6 +2979,7 @@ body.dialog-open {
   border-radius: 0.25rem;
   padding: var(--pico-spacing);
   cursor: pointer;
+  display: inline-block;
 }
 
 .small,
