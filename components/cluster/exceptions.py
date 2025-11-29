@@ -18,6 +18,10 @@ class IncomingDataError(ClusterException):
     pass
 
 
+class MetaDataError(ClusterException):
+    pass
+
+
 class ResponseError(ClusterException):
     pass
 

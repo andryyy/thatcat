@@ -8,6 +8,7 @@ import contextvars
 
 from collections import OrderedDict
 from components.cluster.exceptions import ClusterException
+from components.cluster.models import ClusterState
 from components.database.helpers import (
     create_sort_key,
     filter_rows,
@@ -30,28 +31,25 @@ except Exception:
 
 JSON = Dict[str, Any]
 
-# Constants
 DEFAULT_CACHE_SIZE = 2048
 DEFAULT_PAGE_SIZE = 50
 MAX_COMPRESSED_PAYLOAD_SIZE = 32 * 1024 * 1024  # 32 MB
 MAX_RAW_PAYLOAD_SIZE = 128 * 1024 * 1024  # 128 MB
 SYNC_PAYLOAD_FORMAT_VERSION = 2
 
-# Table field mappings for list_rows projection
-_DEFAULT_LIST_ROW_FIELDS = ["id", "created", "updated", "doc_version"]
+_DEFAULT_LIST_ROW_FIELDS = {"id", "created", "updated", "doc_version"}
 LIST_ROW_FIELDS = {
-    "users": _DEFAULT_LIST_ROW_FIELDS + ["login"],
-    "projects": _DEFAULT_LIST_ROW_FIELDS + ["name", "assigned_users", "location"],
-    "cars": _DEFAULT_LIST_ROW_FIELDS + ["vin", "assigned_users", "assigned_project"],
-    "processings": _DEFAULT_LIST_ROW_FIELDS + ["assigned_user"],
+    "cars": _DEFAULT_LIST_ROW_FIELDS | {"vin", "assigned_users", "assigned_project"},
+    "projects": _DEFAULT_LIST_ROW_FIELDS | {"name", "assigned_users", "location"},
+    "users": _DEFAULT_LIST_ROW_FIELDS | {"login"},
+    "processings": _DEFAULT_LIST_ROW_FIELDS | {"assigned_user"},
 }
 
-# Index definitions for each table
 INDEX_FIELDS = {
-    "cars": ["id", "vin", "assigned_users", "assigned_project"],
-    "projects": ["id", "name", "assigned_users"],
-    "users": ["id", "login", "credentials.id", "acl"],
-    "processings": ["id", "assigned_user", "assets.id"],
+    "cars": LIST_ROW_FIELDS["cars"],
+    "projects": LIST_ROW_FIELDS["projects"],
+    "users": LIST_ROW_FIELDS["users"] | {"credentials.id", "acl"},
+    "processings": LIST_ROW_FIELDS["processings"] | {"assets.id"},
 }
 
 _changed_ctx = contextvars.ContextVar("_changed_ctx", default={})
@@ -68,8 +66,6 @@ def _reset_context_vars():
 
 
 class StorageCodec:
-    """Codec for serializing/deserializing database documents."""
-
     SUPPORTED_CODECS = {"json", "msgpack"}
 
     def __init__(self, kind: str = "msgpack"):
@@ -83,7 +79,6 @@ class StorageCodec:
         self.kind = kind
 
     def dumps(self, obj: dict) -> bytes:
-        """Serialize an object to bytes."""
         if self.kind == "msgpack":
             return msgpack.dumps(obj, use_bin_type=True)
         elif self.kind == "json":
@@ -91,7 +86,6 @@ class StorageCodec:
         raise ValueError(f"Unknown codec: {self.kind}")
 
     def loads(self, data: bytes) -> dict:
-        """Deserialize bytes to an object."""
         if self.kind == "msgpack":
             return msgpack.loads(data, raw=False)
         elif self.kind == "json":
@@ -104,7 +98,10 @@ def _requires_cluster(func):
     async def wrapper(self, *args, **kwargs):
         if not self._cluster_ready.is_set():
             raise ClusterException("Cluster not set")
-        elif not self.cluster.peers.local.leader:
+        elif self.cluster.peers.local.cluster_state not in [
+            ClusterState.COMPLETE,
+            ClusterState.CONSISTENT_WITH_MISSING,
+        ]:
             raise ClusterException("Cluster not ready")
         return await func(self, *args, **kwargs)
 
@@ -144,9 +141,7 @@ class Database:
         self.main_path = self.base / main_file
         self.cluster = None
         self._cluster_ready = asyncio.Event()
-        self._open = False
         self._manifest: JSON = {}
-        self._peer_manifests: Dict[str, JSON] = {}
         self._indexes: Dict[str, Dict[str, Dict[Any, Set[str]]]] = {}
         self._cache = _LRU(max_entries=DEFAULT_CACHE_SIZE)
         self._locks: Dict[Tuple[str, str], asyncio.Lock] = {}
@@ -161,6 +156,14 @@ class Database:
         if not _deleted_ctx.get():
             _deleted_ctx.set({})
 
+    @staticmethod
+    def _to_indexable_key(v: Any) -> Any:
+        if isinstance(v, dict):
+            return json.dumps(v, sort_keys=True, separators=(",", ":"))
+        if isinstance(v, list):
+            return tuple(v)
+        return v
+
     @property
     def cluster(self):
         return self._cluster
@@ -172,7 +175,6 @@ class Database:
             self._cluster_ready.set()
 
     def _validate_id(self, id_: str) -> None:
-        """Validate that a document ID is safe and well-formed."""
         if not id_:
             raise ValueError("id must be non‑empty")
         if not isinstance(id_, str):
@@ -181,7 +183,6 @@ class Database:
             raise ValueError(f"Invalid document id {id_!r}")
 
     def _resolve_doc_path(self, table: str, id_: str) -> Path:
-        """Resolve and validate the file path for a document."""
         self._validate_id(id_)
         tdir = (self.base / table).resolve()
         p = (self.base / table / id_).resolve()
@@ -190,38 +191,38 @@ class Database:
         return p
 
     def _lock_for(self, table: str, id_: str) -> asyncio.Lock:
-        """Get or create a lock for a specific document."""
         key = (table, id_)
         if key not in self._locks:
             self._locks[key] = asyncio.Lock()
         return self._locks[key]
 
     async def do_rollback(self, cluster_peers: list = []) -> None:
-        """Rollback changes to previously saved snapshots."""
         try:
             snapshots = _snapshots_ctx.get()
             if not snapshots:
                 logger.debug("Nothing to rollback")
                 return
 
-            # Restore local snapshots
             for table in snapshots:
                 await self.apply_snapshot(table, snapshots[table])
 
-            # Propagate rollback to peers if needed
             if cluster_peers:
                 comp_sync = await self.make_sync_from_docs(snapshots)
                 _, comp_b64 = comp_sync.split(" ", 1)
                 for peer in cluster_peers:
-                    await self.cluster.send_command(
-                        f"DBSYNC BLOCK {comp_b64}", peer, raise_err=True
+                    ret, resp = await self.cluster.send_command(
+                        f"DBSYNC {comp_b64}", peer
                     )
+                    if not ret:
+                        logger.error(f"Rollback on peer {peer} failed: {resp}")
+                    else:
+                        logger.info(f"Rollbacked back peer {peer}")
         except Exception as e:
-            logger.critical(e)
-            logger.error("Rollback failed")
+            logger.critical(
+                f"Rollback failed due to unhandled error: {e}", exc_info=True
+            )
 
     async def _build_all_indexes(self) -> None:
-        """Build all indexes defined in INDEX_FIELDS constant."""
         for table, fields in INDEX_FIELDS.items():
             await self.build_index(table, fields)
 
@@ -231,7 +232,6 @@ class Database:
         return self
 
     async def _replicate_to_peers(self, sync_str: str) -> None:
-        """Replicate changes to cluster peers, rolling back on failure."""
         try:
             _, b64 = sync_str.split(" ", 1)
             ok_peers = []
@@ -255,7 +255,6 @@ class Database:
             logger.critical(e)
 
     async def _cleanup_locks_and_save(self) -> None:
-        """Release cluster locks and save manifest."""
         async with self._lock_for("aexit", "1"):
             locks = _locks_ctx.get()
             for doc_id, lock_id in locks.items():
@@ -392,38 +391,23 @@ class Database:
     def _update_indexes_for_doc_change(
         self, table: str, *, id_: str, old_doc: JSON | None, new_doc: JSON | None
     ) -> None:
-        """Update indexes when a document changes."""
         if table not in self._indexes:
             return
 
         for f, mapping in self._indexes[table].items():
-            # Remove old document values from index
             if old_doc is not None:
                 for v in get_all(old_doc, f):
-                    try:
-                        s = mapping.get(v)
-                    except TypeError:
-                        logger.warning(
-                            f"Cannot index unhashable value of type {type(v).__name__} "
-                            f"for field '{f}' in table '{table}'"
-                        )
-                        continue
+                    key = self._to_indexable_key(v)
+                    s = mapping.get(key)
                     if s:
                         s.discard(id_)
                         if not s:
-                            mapping.pop(v, None)
+                            mapping.pop(key, None)
 
-            # Add new document values to index
             if new_doc is not None:
                 for v in get_all(new_doc, f):
-                    try:
-                        bucket = mapping.setdefault(v, set())
-                    except TypeError:
-                        logger.warning(
-                            f"Cannot index unhashable value of type {type(v).__name__} "
-                            f"for field '{f}' in table '{table}'"
-                        )
-                        continue
+                    key = self._to_indexable_key(v)
+                    bucket = mapping.setdefault(key, set())
                     bucket.add(id_)
 
     async def _upsert_local(
@@ -434,6 +418,7 @@ class Database:
         *,
         replace: bool,
         incoming_version: int | None = None,
+        force_incoming_version: bool = False,
     ) -> None:
         lock = self._lock_for(table, id_)
         async with lock:
@@ -459,7 +444,9 @@ class Database:
             await asyncio.to_thread(tmp.replace, path)
             t = self._tbl(table)
             if incoming_version is not None:
-                if int(t["doc_versions"].get(id_, 0)) > int(incoming_version):
+                if not force_incoming_version and int(
+                    t["doc_versions"].get(id_, 0)
+                ) > int(incoming_version):
                     raise ValueError("Local document version ahead")
                 t["doc_versions"][id_] = int(incoming_version)
             else:
@@ -513,14 +500,11 @@ class Database:
             self._locks.pop((table, id_), None)
 
     async def build_index(self, table: str, fields: List[str]) -> None:
-        """Build indexes for specified fields in a table."""
         idxs = self._indexes.setdefault(table, {})
 
-        # Initialize index structures
         for f in fields:
             idxs[f] = {}
 
-        # Populate indexes with existing documents
         for id_ in self.ids(table):
             doc = await self.get(table, id_)
             if not doc:
@@ -528,14 +512,9 @@ class Database:
 
             for f in fields:
                 for v in get_all(doc, f):
-                    try:
-                        bucket = idxs[f].setdefault(v, set())
-                        bucket.add(id_)
-                    except TypeError:
-                        logger.warning(
-                            f"Cannot index unhashable value of type {type(v).__name__} "
-                            f"for field '{f}' in table '{table}'"
-                        )
+                    key = self._to_indexable_key(v)
+                    bucket = idxs[f].setdefault(key, set())
+                    bucket.add(id_)
 
     async def search(
         self,
@@ -558,34 +537,29 @@ class Database:
         candidate_ids: Set[str] | None = None
         unindexed_fields = []
 
-        # Use indexes to narrow down candidates
         for f, val in where.items():
             values = ensure_list(val)
             if f in idxs:
-                # Use existing index
                 field_results = set()
                 for v in values:
-                    field_results |= idxs[f].get(v, set())
+                    key = self._to_indexable_key(v)
+                    field_results |= idxs[f].get(key, set())
                 if candidate_ids is None:
                     candidate_ids = field_results
                 else:
                     candidate_ids &= field_results
             else:
-                # Track unindexed fields for auto-indexing
                 unindexed_fields.append(f)
 
-        # Auto-create indexes for unindexed fields
         if unindexed_fields:
             logger.info(
                 f"Auto-creating indexes for fields {unindexed_fields} in table '{table}'"
             )
             await self.build_index(table, unindexed_fields)
 
-        # If no indexes were used, search all documents
         if candidate_ids is None:
             candidate_ids = set(self.ids(table))
 
-        # Filter candidates using the where clause
         results: Set[str] = set()
         for id_ in candidate_ids:
             doc = await self.get(table, id_)
@@ -594,12 +568,10 @@ class Database:
             if match_clause(doc, where):
                 results.add(id_)
 
-        # Sort and limit results
         ordered = sorted(results)
         if limit is not None:
             ordered = ordered[:limit]
 
-        # Fetch final documents
         out: List[JSON] = []
         for id_ in ordered:
             doc = await self.get(table, id_)
@@ -619,45 +591,82 @@ class Database:
         any_of: list[dict] | None = None,
         q: str | None = None,
     ):
-        """
-        Filtering:
-          - where: AND across fields; within a field pass a list for OR (e.g., {"status": ["open","pending"]})
-          - any_of: OR across clauses, each clause has same semantics as 'where'
-          - q: case-insensitive substring applied to stringified row values
+        idxs = self._indexes.get(table, {})
+        candidate_ids: set[str] | None = None
 
-        Notes:
-          - Filtering happens on the *row projection* (first value at each path).
-        """
+        if where or any_of:
+            where_ids: set[str] | None = None
+            if where:
+                indexed_where = {k: v for k, v in where.items() if k in idxs}
+                if indexed_where:
+                    id_sets = []
+                    for field, values in indexed_where.items():
+                        field_ids = set()
+                        for value in ensure_list(values):
+                            key = self._to_indexable_key(value)
+                            field_ids.update(idxs[field].get(key, set()))
+                        id_sets.append(field_ids)
 
-        # Load and project rows
-        ids = self.ids(table)
+                    if id_sets:
+                        where_ids = set.intersection(*id_sets)
+
+            any_of_ids: set[str] | None = None
+            if any_of:
+                can_optimize_any_of = all(
+                    any(k in idxs for k in clause) for clause in any_of
+                )
+                if can_optimize_any_of:
+                    any_of_ids = set()
+                    for clause in any_of:
+                        clause_id_sets = []
+                        indexed_clause = {k: v for k, v in clause.items() if k in idxs}
+                        for field, values in indexed_clause.items():
+                            field_ids = set()
+                            for value in ensure_list(values):
+                                key = self._to_indexable_key(value)
+                                field_ids.update(idxs[field].get(key, set()))
+                            clause_id_sets.append(field_ids)
+
+                        if clause_id_sets:
+                            any_of_ids.update(set.intersection(*clause_id_sets))
+
+            if where_ids is not None:
+                candidate_ids = where_ids
+
+            if any_of_ids is not None:
+                if candidate_ids is None:
+                    candidate_ids = any_of_ids
+                else:
+                    candidate_ids.intersection_update(any_of_ids)
+
+        if candidate_ids is None:
+            ids_to_load = self.ids(table)
+        else:
+            ids_to_load = list(candidate_ids)
+
+        if not ids_to_load:
+            return paginate_rows([], page, page_size, sort_attr, sort_reverse)
+
         rows = []
-        for id_ in ids:
+        projection_fields = LIST_ROW_FIELDS.get(table, _DEFAULT_LIST_ROW_FIELDS)
+
+        for id_ in ids_to_load:
             doc = await self.get(table, id_)
             if not doc:
                 continue
-            rows.append(
-                {
-                    k: v
-                    for k, v in doc.items()
-                    if k in LIST_ROW_FIELDS.get(table, _DEFAULT_LIST_ROW_FIELDS)
-                }
-            )
 
-        # Apply filters
+            rows.append({k: v for k, v in doc.items() if k in projection_fields})
+
         rows = filter_rows(rows, where, any_of, q)
 
-        # Apply sorting
         if sort_attr != -1:
             rows.sort(
                 key=create_sort_key(sort_attr, sort_reverse), reverse=sort_reverse
             )
 
-        # Apply pagination
         return paginate_rows(rows, page, page_size, sort_attr, sort_reverse)
 
     def _has_pending_changes(self) -> bool:
-        """Check if there are any pending changes or deletions."""
         changed = self._changed_dict()
         deleted = self._deleted_dict()
         has_changes = any(len(s) > 0 for s in changed.values())
@@ -665,7 +674,6 @@ class Database:
         return has_changes or has_deletes
 
     def _encode_sync_payload(self, payload: Dict[str, Any]) -> str:
-        """Encode a sync payload to compressed base64 string."""
         raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         b64 = base64.b64encode(zlib.compress(raw)).decode("ascii")
         return "DBSYNC BLOCK " + b64
@@ -687,7 +695,6 @@ class Database:
             changed_ids = changed.get(table, set())
             deleted_ids = deleted.get(table, set())
 
-            # Collect changed documents
             docs: Dict[str, Any] = {}
             for id_ in changed_ids:
                 doc = await self.get(table, id_)
@@ -706,8 +713,6 @@ class Database:
         return self._encode_sync_payload(payload)
 
     def _decode_sync_payload(self, data_b64: str) -> Dict[str, Any]:
-        """Decode and validate a sync payload."""
-        # Strip DBSYNC prefix if present
         if data_b64.startswith("DBSYNC BLOCK "):
             data_b64 = data_b64[len("DBSYNC BLOCK ") :]
 
@@ -719,7 +724,6 @@ class Database:
             if len(zipped) > MAX_COMPRESSED_PAYLOAD_SIZE:
                 raise ValueError("Compressed sync payload too large")
 
-            # Decompress with size limit
             try:
                 raw = zlib.decompress(zipped, max_length=MAX_RAW_PAYLOAD_SIZE)
             except TypeError:
@@ -747,7 +751,6 @@ class Database:
         conflicts: list[tuple[str, str, str]] = []
 
         for table, entry in payload.get("tables", {}).items():
-            # Process deletions
             for id_ in entry.get("deleted_ids", []):
                 try:
                     await self._delete_local(table, id_)
@@ -755,13 +758,17 @@ class Database:
                 except Exception as e:
                     conflicts.append((table, id_, f"delete: {e!s}"))
 
-            # Process upserts - respect incoming versions from sync payload
             doc_versions = entry.get("doc_versions", {})
             for id_, doc in entry.get("docs", {}).items():
                 try:
                     incoming_version = doc_versions.get(id_)
                     await self._upsert_local(
-                        table, id_, doc, replace=True, incoming_version=incoming_version
+                        table,
+                        id_,
+                        doc,
+                        replace=True,
+                        incoming_version=incoming_version,
+                        force_incoming_version=True,
                     )
                     applied_upserts += 1
                 except Exception as e:
@@ -790,8 +797,15 @@ class Database:
         for id_, doc in snapshot.items():
             if doc is not None:
                 d = dict(doc)
-                d.pop("id", None)
-                await self._upsert_local(table, id_, d, replace=True)
+                incoming_version = d.pop("doc_version", None)
+                await self._upsert_local(
+                    table,
+                    id_,
+                    d,
+                    replace=True,
+                    incoming_version=incoming_version,
+                    force_incoming_version=True,
+                )
 
     async def make_sync_from_docs(
         self, tables_docs: Dict[str, Dict[str, JSON | None]]

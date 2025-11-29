@@ -9,6 +9,7 @@ from components.utils.misc import ensure_list, unique_list
 from config import defaults
 from functools import wraps
 from dataclasses import asdict
+from .cache import FORM_OPTIONS_CACHE, FORM_OPTIONS_TABLE_VERSIONS
 
 
 class AuthException(Exception):
@@ -66,6 +67,16 @@ async def create_session_by_token(token):
         raise AuthException("Invalid access token format")
 
     token_user, token_value = token.split(":")
+    token_user = str(token_user.strip())
+    token_value = str(token_value.strip())
+
+    if (
+        not token_user
+        or not token_value
+        or len(token_user) < 3
+        or len(token_value) < 16
+    ):
+        raise AuthException("Invalid token data")
 
     async with db:
         user = await db.search(
@@ -80,7 +91,7 @@ async def create_session_by_token(token):
     user = User(**user[0])
 
     if token_value not in user.profile.access_tokens:
-        raise AuthException("Token unknown in user context")
+        raise AuthException("Token invalid")
 
     for k, v in asdict(
         UserSession(
@@ -146,7 +157,7 @@ def acl(acl_type):
                     "X-Forwarded-For", request.remote_addr
                 )
                 logger.warning(
-                    f'{client_addr} - {session.get("login")}[ID={session.get("id")}] tried to access {request.path}'
+                    f"{client_addr} - {session.get('login')}[ID={session.get('id')}] tried to access {request.path}"
                 )
 
                 if "hx-request" in request.headers:
@@ -177,21 +188,25 @@ def formoptions(options: list):
                 if option == "users" and "system" not in session["acl"]:
                     continue
 
-                if option == "users":
-                    async with db:
-                        rows = await db.list_rows("users", page_size=-1)
+                rows = None
+                table_version = db.table_version(option)
+                cached_version = FORM_OPTIONS_TABLE_VERSIONS.get(option)
 
-                    request.form_options[option] = {
-                        row["id"]: row for row in rows["items"]
-                    }
+                if cached_version is not None and cached_version == table_version:
+                    rows = FORM_OPTIONS_CACHE.get(option)
+
+                if rows is None:
+                    async with db:
+                        rows_result = await db.list_rows(option, page_size=-1)
+                    rows = rows_result["items"]
+                    FORM_OPTIONS_CACHE[option] = rows
+                    FORM_OPTIONS_TABLE_VERSIONS[option] = table_version
+
+                if option == "users":
+                    request.form_options[option] = {row["id"]: row for row in rows}
 
                 elif option in model_meta["objects"]["types"]:
-                    async with db:
-                        rows = await db.list_rows(option, page_size=-1)
-
-                    request.form_options[option] = {
-                        row["id"]: row for row in rows["items"]
-                    }
+                    request.form_options[option] = {row["id"]: row for row in rows}
 
                     for k, v in request.form_options[option].items():
                         request.form_options[option][k]["permitted"] = False

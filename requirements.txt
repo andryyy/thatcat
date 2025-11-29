@@ -1,3 +1,5 @@
 quart
 jinja2
 python-magic
+pytesseract
+Pillow

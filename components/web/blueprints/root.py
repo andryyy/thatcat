@@ -18,6 +18,7 @@ from components.web.utils.wrappers import acl, session_clear, websocket_acl
 from components.web.utils.ratelimiter import RateLimiter
 from components.cluster import cluster
 from components.cluster.files import FileGetException
+from components.models.assets import Asset
 from components.database.states import STATE
 
 HS_DIR = os.path.abspath("components/web/templates/_hs")
@@ -75,22 +76,36 @@ async def coords_resolver(coords: str):
         return "", 425
 
 
-@blueprint.route("/asset/<asset_id>")
+@blueprint.route("/asset/<asset_id>/<asset_filename>")
+@blueprint.route("/asset/<asset_id>/<asset_filename>/<attachment>")
 @acl("any")
-async def asset(asset_id: str):
-    asset_path = os.path.abspath(f"assets/{asset_id}")
-    if not asset_path.startswith(os.path.abspath("./assets")):
+async def asset(asset_id: str, asset_filename: str, attachment: str | None = None):
+    try:
+        asset = Asset(id=asset_id, filename=asset_filename)
+    except Exception:
         return "", 404
 
-    if os.path.exists(f"assets/{asset_id}"):
-        return await send_from_directory("assets/", asset_id)
+    if os.path.exists(f"assets/{asset.id}"):
+        return await send_from_directory(
+            "assets/",
+            asset.id,
+            as_attachment=True if attachment else False,
+            attachment_filename=asset.filename,
+            mimetype=asset.mime_type,
+        )
 
     for peer in cluster.peers.get_established():
         try:
             await cluster.files.fileget(
-                f"assets/{asset_id}", f"assets/{asset_id}", peer
+                f"assets/{asset.id}", f"assets/{asset.id}", peer
             )
-            return await send_from_directory("assets/", asset_id)
+            return await send_from_directory(
+                "assets/",
+                asset.id,
+                as_attachment=True if attachment else False,
+                attachment_filename=asset.filename,
+                mimetype=asset.mime_type,
+            )
         except FileGetException:
             pass
 
@@ -106,7 +121,6 @@ async def logout():
 @blueprint.websocket("/ws")
 @websocket_acl("any")
 async def ws():
-
     await websocket.send(
         '<span class="color-green shine" id="ws-indicator" hx-swap-oob="outerHTML">🔌</span>'
     )
@@ -121,6 +135,17 @@ async def ws():
                 data = await websocket.receive()
                 data_dict = json.loads(data)
                 if "path" in data_dict:
+                    path_plain = "/"
+                    path_dom = ""
+                    for part in data_dict["path"].split("/"):
+                        if not part:
+                            continue
+                        path_plain += f"{part}/"
+                        path_dom += f'/<a href="{path_plain}">{part}</a>'
+
+                    await websocket.send(
+                        f'<div id="ws-recv" hx-swap-oob="innerHTML:#ws-path">{path_dom}</div>'
+                    )
                     STATE.ws_connections[session["login"]][
                         websocket._get_current_object()
                     ] = {

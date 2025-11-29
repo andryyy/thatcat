@@ -2,18 +2,7 @@
   {% extends "base.html" %}
 {% endif %}
 
-{% block breadcrumb %}
-<nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
-  <ul>
-    <li><span>...</span></li>
-    <li><a href="#" hx-target="#body-main" hx-get="/objects/{{ request.view_args.get("object_type") }}">{{ L[request.view_args.get("object_type")|capitalize] }}</a></li>
-    <li><a href="#" hx-target="#body-main" hx-get="/objects/{{ request.view_args.get("object_type") }}/{{ object.id }}">{{ object.name }}</a></li>
-  </ul>
-</nav>
-{% endblock breadcrumb %}
-
 {% block body %}
-
 <section class="grid split-grid">
   <article class="hide-below-lg">
     <hgroup>
@@ -30,7 +19,14 @@
     hx-swap="outerHTML"
     hx-get="/objects/{{ request.view_args.get("object_type") }}/{{ object.id }}">
 
-    <form id="object-form" hx-trigger="submit throttle:200ms" hx-patch="/objects/{{ request.view_args.get("object_type") }}/{{ object.id }}">
+    <form id="object-form" _="on submit
+      halt the event
+      add @disabled to <[type='submit']/>
+      add @aria-busy='true' to <[type='submit']/>
+      call submitForm('/objects/{{ request.view_args.get('object_type') }}/{{ object.id }}', me, 'PATCH')
+      remove @disabled from <[type='submit']/>
+      remove @aria-busy from <[type='submit']/>
+    end">
       {% with
         schema=forms.objects[request.view_args.object_type],
         current_data=object

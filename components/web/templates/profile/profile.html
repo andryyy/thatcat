@@ -2,21 +2,11 @@
   {% extends "base.html" %}
 {% endif %}
 
-{% block breadcrumb %}
-<nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
-  <ul>
-    <li><span>{{ L["Profile"] }}</span></li>
-    <li><a href="#" hx-target="#body-main" hx-get="{{ request.path }}">{{ session["login"] }}</a></li>
-  </ul>
-</nav>
-{% endblock breadcrumb %}
-
 {% block body %}
 
 <h5>{{ L["My data"] }}</h5>
-{{ user._test }}
-<article
-  id="profile-container"
+
+<article id="profile-container"
   hx-trigger="reloadProfile"
   hx-select="#profile-form"
   hx-get="/profile/"
@@ -64,6 +54,7 @@
       <fieldset>
         <label hx-patch="/users/{{ session.id }}/credential/{{ credential.id }}"
           hx-params="active"
+          hx-trigger="change from:#cred-toggle-{{ credential.id }}"
           hx-vals='js:{"active":document.getElementById("cred-toggle-{{ credential.id }}").checked}'>
           <input id="cred-toggle-{{ credential.id }}"
             type="checkbox"

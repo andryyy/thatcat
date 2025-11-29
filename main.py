@@ -1,7 +1,10 @@
 import asyncio
 import signal
 import ssl
+import os
+import sys
 
+from pathlib import Path
 from components.cluster import cluster
 from components.database import db
 from components.web.app import app
@@ -10,10 +13,11 @@ from hypercorn.asyncio import serve
 from hypercorn.config import Config
 from hypercorn.middleware import ProxyFixMiddleware
 
+_main_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
 hypercorn_config = Config()
 hypercorn_config.bind = [defaults.HYPERCORN_BIND]
-hypercorn_config.certfile = defaults.TLS_CERTFILE
-hypercorn_config.keyfile = defaults.TLS_KEYFILE
+hypercorn_config.certfile = f"{_main_dir}/{defaults.TLS_CERTFILE}"
+hypercorn_config.keyfile = f"{_main_dir}/{defaults.TLS_KEYFILE}"
 hypercorn_config.include_server_header = False
 hypercorn_config.server_names = defaults.HOSTNAME
 hypercorn_config.ciphers = "ECDHE+AESGCM"
@@ -42,6 +46,14 @@ async def main():
         loop.add_signal_handler(sig, handle_shutdown)
 
     try:
+        combined_js = Path("components/web/static_files/bundle.js")
+        with open(combined_js, "w", encoding="utf-8") as combined_js_file:
+            js_file_list = sorted(Path("components/web/static_files/js").rglob("*js"))
+            for js_path in js_file_list:
+                with open(js_path, "r", encoding="utf-8") as infile:
+                    combined_js_file.write(infile.read())
+                    combined_js_file.write("\n")
+
         async with asyncio.TaskGroup() as tg:
             db.cluster = cluster
             web_server = serve(

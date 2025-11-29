@@ -43,13 +43,7 @@
     {% include "objects/includes/objects/table_filters/" ~ request.view_args.get("object_type") ~ ".html" %}
 
     <div>
-      {% if request.view_args.get("object_type") == "cars" %}
-        {% set attributes = ["vin", "created", "updated"] %}
-      {% elif request.view_args.get("object_type") == "projects" %}
-        {% set attributes = ["name", "created", "updated"] %}
-      {% endif %}
-
-      {% for attribute in attributes %}
+      {% for attribute in ["name", "created", "updated"] %}
       <button class="sorting {{ "secondary outline" if sorting_attr != attribute }}" data-loading-disable
               type="submit"
               form="{{ request.view_args.get("object_type") }}-table-search"

@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8">
     <meta name="htmx-config" content='{"htmx.config.allowScriptTags":"false"}'>
-    <meta name="viewport" content="width=device-width, user-scalable=no" />
-    <title>Car Manager</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Carrr</title>
     <meta name="apple-mobile-web-app-capable" content="yes"/>
     <link rel="manifest" href="/static/manifest.json" />
     <meta name="theme-color" content="var(--pico-primary)">
@@ -17,29 +17,18 @@
     <script type="text/hyperscript" src="/_hs/common._hs" defer></script>
     <script type="text/hyperscript" src="/_hs/leaflet._hs" defer></script>
     <script type="text/hyperscript" src="/_hs/vault._hs" defer></script>
-    <script src="/static/js/leaflet/leaflet.js"></script>
-    <script src="/static/js/htmx.org/htmx.org.js"></script>
-    <script src="/static/js/htmx.org/htmx.org.loading-states.js" defer></script>
-    <script src="/static/js/htmx.org/htmx.org.json-enc.js" defer></script>
-    <script src="/static/js/htmx.org/htmx.org.ws.js" defer></script>
-    <script src="/static/js/_hs/_hyperscript.js"></script>
-    <script src="/static/js/_hs/_hyperscript.template.js"></script>
-    <script src="/static/js/passkeys-client-global.js"></script>
-    <script defer src="/static/js/uservault.js"></script>
+    <script type="text/hyperscript" src="/_hs/svg_markers._hs" defer></script>
+    <script src="/static/bundle.js"></script>
   </head>
 
   <body _="install bodydefault" hx-ext="loading-states">
-    <header hx-push-url="true">
+    <header>
     {% block menu %}
       {% include "includes/menu.html" %}
-      <hr>
-    {% endblock %}
-    {% block breadcrumb %}
-      <nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true"></nav>
     {% endblock %}
     </header>
 
-    <main id="body-main">
+    <main id="body-main" hx-history-elt>
     {% block body %}
     {% endblock %}
     </main>
@@ -47,28 +36,41 @@
     <footer>
     {% block footer %}
       {% if session["login"] %}
-      <div id="ws-connect" hx-ext="ws" ws-connect="/ws" _="
+      <div hx-ext="ws" ws-connect="/ws" _="
+        init
+          set :wsValue to (<input[name]/> in me)
+          set value of :wsValue to location.pathname
+        end
         on load 1
           repeat forever
             trigger wsSendPath on body
             wait 3s
           end
         end
-        on htmx:beforeRequest from body
-          set value of #ws-path to event.detail.requestConfig.path
+        on htmx:historyCacheHit from body
+          set value of :wsValue to location.pathname
+          trigger wsSendPath on body
+        end
+        on htmx:beforeRequest[event.detail.requestConfig.verb=='get'] from body
+          set value of :wsValue to event.detail.requestConfig.path
           trigger wsSendPath on body
         end
         on htmx:afterRequest from body
-          set value of #ws-path to location.pathname
+          set value of :wsValue to location.pathname
           trigger wsSendPath on body
         end
       ">
-        <input ws-send name="path" value="{{ request.path }}" id="ws-path" hx-trigger="wsSendPath from:body" type="hidden" />
+        <input ws-send name="path" value="" id="ws-path" hx-trigger="wsSendPath from:body" type="hidden" />
         <div id="ws-recv"></div>
       </div>
       {% endif %}
       {% include "includes/notifications.html" %}
-      <dialog id="img-zoom" _="on click if event.target is in me put '' into me remove .dialog-open from body remove @open"></dialog>
+      <dialog id="img-zoom" _="on click
+        if event.target is in me
+        put '' into me
+        remove @open from me
+        remove .no-interaction from body
+      end"></dialog>
     {% endblock %}
     </footer>
   </body>

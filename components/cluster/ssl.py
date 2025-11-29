@@ -1,4 +1,5 @@
 import ssl
+
 from components.logs import logger
 from config import defaults
 
@@ -12,7 +13,8 @@ def get_ssl_context(type_value: str):
         raise Exception("Unknown type_value")
 
     context.load_cert_chain(
-        certfile=defaults.TLS_CERTFILE, keyfile=defaults.TLS_KEYFILE
+        certfile=defaults.TLS_CERTFILE,
+        keyfile=defaults.TLS_KEYFILE
     )
     context.load_verify_locations(cafile=defaults.TLS_CA)
     context.check_hostname = False

@@ -1,6 +1,8 @@
 <form hx-target="#login-form" hx-post="/auth/login/request" hx-push-url="false">
   <fieldset>
+    <label>{{ L["Login"] }}</label>
     <input name="login" id="login" type="text" />
+    <small>{{ L["Username"] }}</small>
   </fieldset>
   <fieldset>
     <button type="submit">{{ L["Request sign-in"] }}</button>

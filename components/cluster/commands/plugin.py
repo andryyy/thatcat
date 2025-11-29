@@ -1,48 +1,29 @@
-import asyncio
 import time
 
 from ..exceptions import CommandFailed
 from abc import ABC, abstractmethod
 from components.logs import logger
-from components.models.cluster import ErrorMessages, Role
+from ..models import ErrorMessages, Role
 from contextlib import asynccontextmanager
-from functools import wraps
-
-
-def pre_dispatch(fn):
-    @wraps(fn)
-    async def wrapper(*args, **kwargs):
-        _, cluster, data = args
-        if not any(
-            map(
-                lambda s: data.cmd.startswith(s),
-                ["OK", "ERR", "STATUS", "INIT", "BYE"],
-            )
-        ):
-            if not cluster.peers.local.leader:
-                return ErrorMessages.NOT_READY.response
-
-            if (
-                cluster.peers.remotes[data.meta.name].meta.cluster
-                != cluster.peers.local.cluster
-            ):
-                return ErrorMessages.PEERS_MISMATCH.response
-
-        return await fn(*args, **kwargs)
-
-    return wrapper
 
 
 class CommandPlugin(ABC):
     name: str
+    is_callback: bool = False
+    requires_callback: bool = True
 
-    @pre_dispatch
-    async def dispatch(self, cluster: "Server", data: "IncomingData") -> None | str:
+    async def dispatch(self, cluster: "Server", data: "IncomingData") -> None | str:  # noqa: F821
+        if (
+            data.cmd not in {"OK", "ERR", "STATUS", "INIT", "BYE"}
+            and not cluster.peers.peers_consistent()
+        ):
+            return ErrorMessages.NOT_READY.response
+
         async with self.wrapper(data.ticket):
             return await self.handle(cluster, data)
 
     @abstractmethod
-    async def handle(self, cluster: "Server", data: "IncomingData") -> None | str:
+    async def handle(self, cluster: "Server", data: "IncomingData") -> None | str:  # noqa: F821
         pass
 
     @asynccontextmanager
@@ -52,7 +33,7 @@ class CommandPlugin(ABC):
             yield
         except Exception as e:
             logger.error(f"{ticket} failed")
-            logger.critical(e)
+            logger.critical(e, exc_info=True)
             raise CommandFailed(ticket)
         finally:
             duration = time.monotonic() - start
@@ -60,8 +41,13 @@ class CommandPlugin(ABC):
 
 
 class CommandPluginLeader(CommandPlugin):
-    @pre_dispatch
-    async def dispatch(self, cluster: "Server", data: "IncomingData") -> None | str:
+    async def dispatch(self, cluster: "Server", data: "IncomingData") -> None | str:  # noqa: F821
+        if (
+            data.cmd not in {"OK", "ERR", "STATUS", "INIT", "BYE"}
+            and not cluster.peers.peers_consistent()
+        ):
+            return ErrorMessages.NOT_READY.response
+
         if not cluster.peers.local.role == Role.LEADER:
             return ErrorMessages.UNKNOWN_COMMAND.response
 

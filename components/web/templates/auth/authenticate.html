@@ -2,20 +2,14 @@
   {% extends "base.html" %}
 {% endif %}
 
-{% block breadcrumb %}
-<nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
-  <ul>
-    <li><span>{{ L["Welcome"] }} 👋</span></li>
-  </ul>
-</nav>
-{% endblock breadcrumb %}
-
 {% block body %}
 <article class="login-mask">
+  <p>{{ L["Welcome"] }} 👋</p>
   <div id="login-form" class="login-register">
     <form _="install login">
       <fieldset>
         <button type="submit"
+          class="button-blue-800"
           autocomplete="username webauthn"
           autocapitalize="none"
           autocorrect="off"
@@ -43,16 +37,17 @@
   </div>
   <div id="register-form" class="login-register" hidden>
     <form _="install addPasskey(register: true)">
-        <fieldset>
-          <label for="webauthn-register">{{ L["Pick a username"] }}</label>
-          <input type="text" id="webauthn-register" name="login"
-            autocomplete="off"
-            autocorrect="off"
-            autocapitalize="off"
-            spellcheck="false"
-            required>
-        </fieldset>
-        <button type="submit">{{ L["Next"] }}</button>
+      <fieldset>
+        <label for="webauthn-register">{{ L["Username"] }}:</label>
+        <input type="text" id="webauthn-register" name="login"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+          required>
+        <small>{{ L["Pick a username"] }}.</small>
+      </fieldset>
+      <button type="submit">{{ L["Next"] }}</button>
     </form>
   </div>
 

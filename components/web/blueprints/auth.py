@@ -1,7 +1,11 @@
-from quart import Blueprint, render_template, request, session
-from components.web.utils.wrappers import acl, session_clear
+from components.database import db
+from components.database.states import STATE
+from components.logs import logger
+from components.models.auth import Authentication, TokenConfirmation
+from components.models.credentials import CredentialAdd
+from components.models.users import User, UserAdd, UserSession
+from components.utils.datetimes import utc_now_as_str
 from components.web.utils.notifications import trigger_notification, validation_error
-from components.web.utils.utils import ws_htmx
 from components.web.utils.passkeys import (
     generate_authentication_options,
     generate_registration_options,
@@ -10,20 +14,11 @@ from components.web.utils.passkeys import (
     verify_registration_response,
     b64url_decode,
 )
-from components.database import db
-from components.database.states import STATE
-from components.models.users import (
-    User,
-    UserAdd,
-    Authentication,
-    TokenConfirmation,
-    UserSession,
-    CredentialAdd,
-)
-from dataclasses import asdict
-from components.logs import logger
-from components.utils.datetimes import utc_now_as_str
+from components.web.utils.utils import ws_htmx
+from components.web.utils.wrappers import acl, session_clear
 from config import defaults
+from dataclasses import asdict
+from quart import Blueprint, render_template, request, session
 from secrets import token_urlsafe
 from uuid import uuid4
 
@@ -273,7 +268,7 @@ async def register_webauthn_options():
             user = await db.search("users", {"login": request_data.login})
 
         if user:
-            raise ValueError("login", "User is not available")
+            return "User is not available", 409
 
         gen_opts = generate_registration_options(
             user_id=str(uuid4()),
@@ -435,7 +430,11 @@ async def register_webauthn():
     async with db:
         if not session.get("id"):
             user = UserAdd(
-                **{"login": reg_opts["user"]["name"], "credentials": [new_credential]}
+                **{
+                    "id": user_id,
+                    "login": reg_opts["user"]["name"],
+                    "credentials": [new_credential],
+                }
             )
             await db.upsert("users", user_id, asdict(user))
         else:

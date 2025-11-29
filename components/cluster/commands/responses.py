@@ -5,8 +5,9 @@ from components.logs import logger
 
 class OkCommand(CommandPlugin):
     name = "OK"
+    is_callback = True
 
-    async def handle(self, cluster: "Server", data: "IncomingData") -> None:
+    async def handle(self, cluster: "Server", data: "IncomingData") -> None:  # noqa: F821
         if (
             data.ticket in cluster.callbacks
             and data.meta.name in cluster.callbacks[data.ticket]["responses"]
@@ -30,8 +31,9 @@ class OkCommand(CommandPlugin):
 
 class ErrCommand(CommandPlugin):
     name = "ERR"
+    is_callback = True
 
-    async def handle(self, cluster: "Server", data: "IncomingData") -> None:
+    async def handle(self, cluster: "Server", data: "IncomingData") -> None:  # noqa: F821
         if (
             data.ticket in cluster.callbacks
             and data.meta.name in cluster.callbacks[data.ticket]["responses"]
@@ -55,12 +57,13 @@ class ErrCommand(CommandPlugin):
 
 class DataCommand(CommandPlugin):
     name = "DATA"
+    is_callback = True
 
-    async def handle(self, cluster: "Server", data: "IncomingData") -> None:
-        if not data.ticket in cluster.temp_data:
+    async def handle(self, cluster: "Server", data: "IncomingData") -> None:  # noqa: F821
+        if data.ticket not in cluster.temp_data:
             cluster.temp_data[data.ticket] = {}
 
-        if not data.meta.name in cluster.temp_data[data.ticket]:
+        if data.meta.name not in cluster.temp_data[data.ticket]:
             cluster.temp_data[data.ticket][data.meta.name] = []
 
         _, idx, total, partial_data = data.payload.split(" ", 3)

@@ -5,9 +5,11 @@ from components.web.utils.utils import render_or_json
 from components.web.utils.tables import table_search_helper
 from components.database import db
 from components.database.states import STATE
-from components.models.users import USER_ACLS, User, UserPatch, CredentialPatch
+from components.models.users import USER_ACLS, User, UserPatch
+from components.models.profile import UserProfilePatch
+from components.models.credentials import CredentialPatch
 from components.utils.misc import ensure_list
-from dataclasses import asdict, replace
+from dataclasses import asdict
 
 
 blueprint = Blueprint("users", __name__, url_prefix="/users")
@@ -21,6 +23,7 @@ def load_context():
 
 
 @blueprint.route("/<user_id>")
+@blueprint.route("/<user_id>/")
 @acl("system")
 async def get_user(user_id: str):
     async with db:
@@ -116,27 +119,24 @@ async def patch_user_credential(user_id: str, hex_id: str):
 
         for credential in user.credentials:
             if credential.id == hex_id:
-                matched_user_credential = credential
-                break
-        else:
-            raise ValueError("hex_id", "Unknown passkey")
+                user.credentials.remove(credential)
+                patch_data = CredentialPatch(**request.form_parsed)
+                patched_credential = patch_data.merge(credential)
+                user.credentials.append(patched_credential)
+                user_dict = asdict(user)
 
-        user.credentials.remove(matched_user_credential)
-        patch_data = CredentialPatch(**request.form_parsed)
-        patched_credential = replace(
-            matched_user_credential, **patch_data.dump_patched()
-        )
-        user.credentials.append(patched_credential)
-        user_dict = asdict(user)
+                await db.patch(
+                    "users", user_id, {"credentials": user_dict["credentials"]}
+                )
 
-        await db.patch("users", user_id, {"credentials": user_dict["credentials"]})
+                return trigger_notification(
+                    level="success",
+                    response_code=204,
+                    title="Completed",
+                    message="Passkey modified",
+                )
 
-    return trigger_notification(
-        level="success",
-        response_code=204,
-        title="Completed",
-        message="Passkey modified",
-    )
+    raise ValueError("hex_id", "Unknown passkey")
 
 
 @blueprint.route("/<user_id>/credential/<hex_id>", methods=["DELETE"])
@@ -179,16 +179,17 @@ async def patch_user(user_id: str | None = None):
     if request.method == "POST":
         user_id = request.form_parsed.get("id")
 
+    profile_form = request.form_parsed.pop("profile", {})
+    user_patch_data = UserPatch(**request.form_parsed)
+    profile_patch_data = UserProfilePatch(**profile_form)
+
     async with db:
         user = await db.get("users", user_id)
         user = User(**user)
-
-        patch_data = UserPatch(**request.form_parsed)
-
-        user = replace(user, **patch_data.dump_patched())
-        user_dict = asdict(user)
-
-        await db.patch("users", user_id, user_dict)
+        user_profile = profile_patch_data.merge(user.profile)
+        user = user_patch_data.merge(user)
+        user.profile = user_profile
+        await db.patch("users", user_id, asdict(user))
 
     STATE.session_validated.pop(user_id, None)
 

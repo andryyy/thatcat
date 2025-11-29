@@ -27,6 +27,9 @@ async def user_group():
                 all_assignments.append(assignment)
 
         for user_dict in all_assignments:
+            if "groups" not in user_dict:
+                user_dict["groups"] = []
+
             if user_groups.name in user_dict["groups"]:
                 user_dict["groups"].remove(user_groups.name)
 

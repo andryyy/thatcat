@@ -12,13 +12,9 @@ def load_wmi_codes():
                 continue
 
             parts = line.split("|")
-            if len(parts) >= 3:
-                wmi = parts[0].strip()
-                manufacturer = parts[1].strip()
-                country = parts[2].strip()
-
-                # Store as dict with manufacturer and country info
-                wmi_data[wmi] = {"manufacturer": manufacturer, "country": country}
+            wmi = parts[0].strip()
+            manufacturer = parts[1].strip()
+            wmi_data[wmi] = {"manufacturer": manufacturer}
 
     return wmi_data
 

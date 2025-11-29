@@ -1,0 +1,287 @@
+{% if not request.headers.get("Hx-Request") %}
+  {% extends "base.html" %}
+{% endif %}
+
+{% block body %}
+
+<section class="grid-space-between"
+  _="on click from <a/> in me
+    set tab to closest <a/> to event.target
+    halt the event
+    add @hidden to .tab
+    remove @hidden from .{tab's @data-tab}
+    take .color-pink from <a/> in me for tab
+    take .active-indicator from <a/> in me for tab
+    if tab's @data-tab == 'processings'
+      trigger loadProcessings on #processings
+    else
+      put '' into #processings
+    end
+  end">
+  <div>
+    <a href="#" data-tab="upload" class="no-text-decoration active-indicator color-pink">{{ L["Upload"] }}</a>
+    <a href="#" data-tab="processings" class="no-text-decoration">{{ L["Open"] }} [<b id="processings-count">{{ processings_count }}</b>]</a>
+  </div>
+  <div id="tasks" hx-swap="innerHTML" hx-get="/processings/tasks" hx-trigger="load once"></div>
+</section>
+
+<hr>
+
+<section class="upload">
+  <div class="input-select grid grid-auto-cols" _="on click from <label/> in me
+      call #tasks-form.reset()
+      if event.target's @data-value is 'text-input' remove @hidden
+        remove @hidden from #text-input
+      else
+        add @hidden to #text-input
+      end
+    end">
+    <label for="camera-file-input" data-value="camera-input">
+        📷 {{ L["Open camera"] }}
+    </label>
+    <label for="data-file-input" data-value="file-input">
+      📄 {{ L["Upload file(s)"] }}
+    </label>
+    <label data-value="text-input">
+      📝 {{ L["Enter text"] }}
+    </label>
+  </div>
+  <form id="tasks-form" hx-target="#tasks"
+    hx-swap="innerHTML"
+    hx-trigger="postChange,click from:button,submit from:button"
+    hx-encoding="multipart/form-data"
+    _="on htmx:afterRequest[event.detail.successful==true]
+      put '' into <textarea/> in me
+      add @hidden to #text-input
+    end
+
+    def getPos(evt)
+      set canvas to evt.target
+        if evt.touches and evt.touches.length > 0
+          set clientX to evt.touches[0].clientX
+          set clientY to evt.touches[0].clientY
+        else
+          set clientX to evt.clientX
+          set clientY to evt.clientY
+        end
+      set rect to canvas.getBoundingClientRect()
+      set scaleX to canvas.width / rect.width
+      set scaleY to canvas.height / rect.height
+      set startX to (clientX - rect.left) * scaleX
+      set startY to (clientY - rect.top) * scaleY
+      return {x: startX, y: startY}
+    end
+
+    on click from .next in #crop-dialog or click from .prev in #crop-dialog
+      halt the event
+      set currentImage to first <section:not([hidden])/> in #crop-dialog
+      if event.target matches .next
+        set nextImage to (next <#crop-dialog section/> from currentImage)
+        if nextImage
+          remove @disabled from .prev in #crop-dialog
+          if last <section/> in #crop-dialog is nextImage
+            add @disabled to .next
+          end
+          add @hidden to currentImage
+          remove @hidden from nextImage
+        end
+      else if event.target matches .prev
+        set prevImage to (previous <#crop-dialog section/> from currentImage)
+        if prevImage
+          remove @disabled from .next in #crop-dialog
+          if first <section/> in #crop-dialog is prevImage
+            add @disabled to .prev
+          end
+          add @hidden to currentImage
+          remove @hidden from prevImage
+        end
+      end
+    end
+
+    on mousemove from #crop-dialog-images or touchmove from #crop-dialog-images
+      if event.target matches <canvas/> and :isDragging
+        halt the event
+        set canvas to event.target
+        set ctx to canvas.getContext('2d')
+        set ctx.imageSmoothingQuality to 'high'
+        set img to first <img/> in canvas
+        set pos to getPos(event)
+        set currentX to pos.x
+        set currentY to pos.y
+        set w to currentX - :startX
+        set h to currentY - :startY
+        set x to :startX
+        set y to :startY
+        if (w < 0)
+          set x to currentX
+          set w to Math.abs(w)
+        end
+        if (h < 0)
+          set y to currentY
+          set h to Math.abs(h)
+        end
+        set x to 0 unless x >= 0
+        set y to 0 unless y >= 0
+        if (x + w) > canvas.width
+          set w to canvas.width - x
+        end
+        if (y + h) > canvas.height
+          set h to canvas.height - y
+        end
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+        ctx.drawImage(img, 0, 0)
+        set ctx.fillStyle to 'rgba(0, 0, 0, 0.5)'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        ctx.clearRect(x, y, w, h)
+        ctx.drawImage(img, x, y, w, h, x, y, w, h)
+        set ctx.strokeStyle to '#fff'
+        set ctx.lineWidth to 1
+        ctx.strokeRect(x, y, w, h)
+        set :selection to {x: x, y: y, w: w, h: h}
+      end
+    end
+
+    on mouseup from #crop-dialog or touchend from #crop-dialog
+      if event.target matches <canvas/> and :isDragging
+        set :isDragging to false
+        exit unless :selection is not false
+        set canvas to event.target
+        set fileIndex to canvas's @data-idx
+        if call window.imageBlobs[fileIndex].name.endswith('.png')
+          set filenamePng to window.imageBlobs[fileIndex].name + '.png'
+        else
+          set filenamePng to window.imageBlobs[fileIndex].name
+        end
+        make a <canvas/> called cropCanvas
+        set cropCtx to cropCanvas.getContext('2d')
+        set cropCtx.imageSmoothingQuality to 'high'
+        set w to Math.round(:selection.w)
+        set h to Math.round(:selection.h)
+        set x to Math.round(:selection.x)
+        set y to Math.round(:selection.y)
+        set cropCanvas.width to w
+        set cropCanvas.height to h
+        cropCtx.drawImage(canvas,
+          x, y, w, h,
+          0, 0, w, h
+        )
+        js(cropCanvas, filenamePng, fileIndex)
+          cropCanvas.toBlob((blob) => {
+            file = new File([blob], filenamePng, {type: 'image/png'});
+            window.imageBlobs[fileIndex] = file
+          }, 'image/png');
+        end
+      end
+    end
+
+    on mousedown[buttons==1] from #crop-dialog-images or touchstart from #crop-dialog-images
+      if event.target matches <canvas/>
+        if event.type is 'touchstart' and event.touches.length is not 1
+          set :isDragging to false
+          set :selection to false
+          exit
+        else
+          set :isDragging to true
+          set :selection to false
+          set pos to getPos(event)
+          set :startX to pos.x
+          set :startY to pos.y
+        end
+      end
+    end
+
+    on change from #camera-file-input in me
+      set window.imageBlobs to {}
+      remove <section/> from #crop-dialog-images
+      add @disabled to .prev in #crop-dialog
+      add @disabled to .next in #crop-dialog
+      repeat for file in event.target's files index idx
+        if idx == 1
+          remove @disabled from .next in #crop-dialog
+        end
+        set window.imageBlobs[idx] to file
+        make a <section/> called section
+          add @hidden to it unless #crop-dialog-images.childElementCount is 0
+        make a <canvas/> called canvas
+          set its @data-idx to idx
+        make an <img/> called img
+          set its @alt to 'waiting'
+        put img into canvas
+        put canvas into section
+        put section at the end of #crop-dialog-images
+        js(file, img, canvas)
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            img.onload = () => {
+              canvas.width = img.naturalWidth;
+              canvas.height = img.naturalHeight;
+              const ctx = canvas.getContext('2d');
+              ctx.imageSmoothingQuality = 'high';
+              ctx.drawImage(img, 0, 0);
+            }
+            img.src = event.target.result;
+          };
+          reader.readAsDataURL(file);
+        end
+      end
+      add @open to #crop-dialog
+      add .no-interaction to body
+    end
+    "
+    hx-post="/processings/upload">
+    <input id="camera-file-input" type="file" multiple accept="image/*" capture="environment" name="images" hidden>
+    <input id="data-file-input" type="file" multiple accept="*" name="files" hidden>
+    <section id="text-input" hidden>
+      <fieldset data-loading-disable>
+        <textarea name="text_data" rows="10" placeholder="{{ L["Enter text"] }}..."></textarea>
+        <button class="secondary" data-loading-disable type="submit">{{ L["Save"] }}</button>
+      </fieldset>
+    </section>
+    <div _="install xhrProgress" hidden></div>
+  </form>
+  <dialog id="crop-dialog">
+    <article>
+      <div class="grid-space-between">
+        <h6>{{ L["Crop image"] }}</h6>
+        <a href="#" _="on click halt the event remove @open from closest <dialog/> remove .no-interaction from body end">Close</a>
+      </div>
+      <p>{{ L["Crop image to contain the area a VIN is found in"] }}</p>
+      <div class="grid-space-between">
+        <a role="button" class="secondary" href="#" _="on click
+          halt the event
+          set currentImageSection to first <section:not([hidden])/> in #crop-dialog-images
+          set currentCanvas to first <canvas/> in currentImageSection
+          set ctx to currentCanvas.getContext('2d')
+          set img to first <img/> in currentCanvas
+          ctx.clearRect(0, 0, currentCanvas.width, currentCanvas.height)
+          ctx.drawImage(img, 0, 0)
+          set :selection to false
+          set :isDragging to false
+        end">{{ L["Reset"] }}</a>
+        <div>
+          <a role="button" class="prev secondary" href="#">{{ L["Back"] }}</a>
+          <a role="button" class="next secondary" href="#">{{ L["Next"] }}</a>
+        </div>
+      </div>
+      <div id="crop-dialog-images"></div>
+      <div class="grid-space-between">
+        <div></div>
+        <a role="button" href="#" _="on click
+          halt the event
+          js return new DataTransfer() end
+            set data to result
+          repeat for idx in Object.keys(window.imageBlobs)
+            data.items.add(window.imageBlobs[idx])
+          end
+          set #camera-file-input.files to data.files
+          trigger postChange on #tasks-form
+          remove @open from closest <dialog/> remove .no-interaction from body
+        end">{{ L["Save"] }}</a>
+      </div>
+    </article>
+  </dialog>
+</section>
+
+<section class="processings" id="processings" hx-post="/processings/search" hx-trigger="removeProcessing, reloadProcessings, loadProcessings" hidden></section>
+
+{% endblock body %}

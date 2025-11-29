@@ -2,14 +2,6 @@
   {% extends "base.html" %}
 {% endif %}
 
-{% block breadcrumb %}
-<nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
-  <ul>
-    <li><span>System</span></li>
-    <li><a href="#" hx-target="#body-main" hx-get="{{ request.path }}">Gruppen</a></li>
-  </ul>
-</nav>
-{% endblock breadcrumb %}
 
 {% block body %}
 

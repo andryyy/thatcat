@@ -50,31 +50,32 @@ behavior vaultDialog
   def setUnlocked
     add .hidden to <fieldset/> in me
     get .vault-unlock in me
-      set its textContent to '{{ L["Lock"] }}'
+      set its innerHTML to '{{ L["Lock"] }}'
       remove @disabled from it
-    set #vault-dialog-toggle's @class to 'shine color-green'
-    set #vault-dialog-toggle's textContent to '{{ L["Vault"] }} 🔓'
+    set #vault-dialog-toggle's @class to ('color-green ' + :tresorClasses)
+    set #vault-dialog-toggle's innerHTML to '🔓'
   end
 
   def setLocked
     remove .hidden from <fieldset/> in me
     get .vault-unlock in me
-      set its textContent to '{{ L["Unlock"] }}'
+      set its innerHTML to '{{ L["Unlock"] }}'
       remove @disabled from it
-    set #vault-dialog-toggle's @class to 'shine color-pink'
-    set #vault-dialog-toggle's textContent to '{{ L["Vault"] }} 🔒'
+    set #vault-dialog-toggle's @class to ('color-pink ' + :tresorClasses)
+    set #vault-dialog-toggle's innerHTML to '🔒'
   end
 
   def novault
     add .hidden to <fieldset/> in me
     get .vault-unlock in me
       add @disabled to it
-      set its textContent to '{{ L["Not available"] }}'
-    set #vault-dialog-toggle's @class to 'shine color-zinc-650'
-    set #vault-dialog-toggle's textContent to '{{ L["Vault not available"] }}'
+      set its innerHTML to '{{ L["Not available"] }}'
+    set #vault-dialog-toggle's @class to ('color-zinc-650 ' + :tresorClasses)
+    set #vault-dialog-toggle's innerHTML to '{{ L["Vault not available"] }}'
   end
 
   init
+    set :tresorClasses to #vault-dialog-toggle @class
     if window.vault.isUnlocked()
       call setUnlocked()
     else
@@ -116,6 +117,7 @@ behavior vaultDialog
     end
     set value of (.vault-unlock-pin in me) to ''
     remove @open from closest <dialog/>
+    remove .no-interaction from body
   end
 
   on exception(error)
@@ -131,12 +133,13 @@ end
 
 behavior vaultField
   init
+    remove <label[data-vault-field-toggle]/> in closest <fieldset/>
     set :isActive to false
     if (my value).startsWith('uv:')
       add .encrypted-field
       add @readonly
     end
-    put `<label class="small" _="on click
+    put `<label data-vault-field-toggle class="small" _="on click
       halt the event's bubbling
       trigger vaultToggle on #${my id}
     end">
@@ -146,7 +149,7 @@ behavior vaultField
     set :toggle to #{my id + '-vault-toggle'}
     set :toggle.checked to (I match .encrypted-field)
   end
-  on vaultToggle queue last
+  on vaultToggle from me queue last
     add @disabled to :toggle
     if not :toggle.checked and I match .encrypted-field
       set :toggle.checked to true
@@ -161,10 +164,10 @@ behavior vaultField
     end
     remove @disabled from :toggle
   end
-  on blur or change
+  on blur from me or change from closest <form/>
     vaultField('encrypt')
   end
-  on focus or click from closest <fieldset/>
+  on focus from me or click from closest <fieldset/>
     vaultField('decrypt')
   end
   on htmx:beforeRequest from closest <form/> queue none

@@ -9,7 +9,7 @@ model_forms = {
             },
             "assigned_project": {
                 "title": "Assigned Project",
-                "description": "Assign this car to a project.",
+                "description": "Assign this car to a project",
                 "type": "project",
                 "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
             },
@@ -28,7 +28,7 @@ model_forms = {
             },
             "assigned_users": {
                 "title": "Administrative Users",
-                "description": "These users are allowed to fully administer the project.",
+                "description": "These users are allowed to fully administer the project",
                 "type": "users:multi",
                 "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
             },
@@ -50,7 +50,7 @@ model_forms = {
             },
             "assigned_users": {
                 "title": "Administrative Users",
-                "description": "These users are allowed to fully administer the car.",
+                "description": "These users are allowed to fully administer the car",
                 "type": "users:multi",
                 "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
             },
@@ -74,9 +74,14 @@ model_forms = {
             },
             "assigned_project": {
                 "title": "Assigned Project",
-                "description": "Assign this car to a project.",
+                "description": "Assign this car to a project",
                 "type": "project",
                 "input_extra": 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"',
+            },
+            "car_markers": {
+                "title": "Car markers",
+                "description": "Set markers for this car",
+                "type": "car_markers",
             },
             "location": {"title": "Location", "type": "location"},
             "notes": {

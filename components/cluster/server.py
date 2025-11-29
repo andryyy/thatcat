@@ -2,17 +2,15 @@
 
 import asyncio
 import random
-import string
 
-from config import defaults
-from .base import ServerBase, ALPHABET, MESSAGE_SIZE_BYTES
+from .base import ALPHABET, MESSAGE_SIZE_BYTES, ServerBase
 from .cli import cli_processor
-from .exceptions import *
+from .exceptions import ClusterException, CommandFailed, LockException, ResponseError
+from .models import ErrorMessages, Role
 from .ssl import get_ssl_context
 from components.logs import logger
-from components.models.cluster import ErrorMessages, Role
 from components.utils.datetimes import ntime_utc_now
-from components.utils.misc import unique_list, ensure_list
+from components.utils.misc import ensure_list, unique_list
 
 # Server configuration constants
 DEFAULT_SERVER_LIMIT = 104857600  # 100 MiB
@@ -22,13 +20,6 @@ LOCK_ID_LENGTH = 8
 
 
 class Server(ServerBase):
-    """
-    Cluster server managing peer-to-peer communication, command dispatch, and distributed locking.
-
-    Handles incoming connections from cluster peers, processes commands through registered plugins,
-    manages distributed locks across the cluster, and coordinates with peers in leader/follower roles.
-    """
-
     def __init__(self, port):
         self.locks = dict()
         self.port = port
@@ -39,29 +30,37 @@ class Server(ServerBase):
         self.tasks = set()
         self.locking_timeout = DEFAULT_LOCKING_TIMEOUT
         self._sending_incr = 0
-
-    def register_command(self, plugin: "CommandPlugin"):
-        """Register a command plugin with the server."""
-        self.registry.register(plugin)
+        self._init_completed = asyncio.Event()
 
     async def incoming_handler(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ):
-        """Handle incoming connections from peers or CLI."""
+        await self._init_completed.wait()
+        if self.shutdown_trigger.is_set():
+            raise Exception("Server is not accepting new connections")
+
         socket, *_ = writer.get_extra_info("socket").getsockname()
         raddr, *_ = writer.get_extra_info("peername")
-        peer_init = False
 
-        if socket and raddr in defaults.CLUSTER_CLI_BINDINGS:
+        if socket and raddr in self.peers.local.cli_bindings:
             return await cli_processor((reader, writer))
 
         peer = self.peers.get_peer_by_raddr(raddr)
 
         if peer.streams.ingress:
             if peer.streams.ingress != (reader, writer):
-                raise Exception(f"Duplicate connection from {raddr}/{peer.meta.name}")
-        else:
-            peer.streams.ingress = (reader, writer)
+                raise Exception(f"Duplicate connection from {raddr}/{peer.name}")
+        peer.streams.ingress = (reader, writer)
+
+        if not peer.streams.egress:
+            con, status = await self.peers.connect(peer.name)
+            if not con:
+                connection_status, exc = status
+                raise Exception(
+                    f"Error connecting egress after ingress from {peer.name}: {connection_status}"
+                ) from exc
+
+        await self.watchdog.peer(peer)
 
         while True:
             try:
@@ -74,15 +73,7 @@ class Server(ServerBase):
                 )
 
                 data = self._incoming_parser(input_bytes)
-                await self._validate_and_setup_peer(peer, raddr, data)
-
-                if (
-                    not peer_init
-                    and data.cmd != "BYE"
-                    and not self.shutdown_trigger.is_set()
-                ):
-                    peer_init = True
-                    await self.watchdog.peer(peer.meta.name)
+                self._peer_meta_update(peer, data)
 
                 await self._process_command(data, peer.meta.name)
             except CommandFailed:
@@ -95,15 +86,12 @@ class Server(ServerBase):
             except (asyncio.exceptions.IncompleteReadError, ConnectionResetError) as e:
                 logger.info(f"{raddr} closed connection: {e}")
                 break
-            except ClusterException as e:
-                logger.error(f"Reading input data from {raddr} failed : {e}")
-                break
-            except Exception as e:
-                logger.critical(f"Unhandled exception while reading from {raddr}: {e}")
-                break
             except TimeoutError as e:
                 if str(e) == "SSL shutdown timed out":
                     break
+                raise
+            except Exception as e:
+                logger.critical(f"Error while reading from {raddr}: {e}")
                 raise
 
     async def send_command(
@@ -119,12 +107,11 @@ class Server(ServerBase):
         timeout = float(timeout)
         cmd_name, _, payload = cmd.partition(" ")
 
-        valid_commands = {p.name for p in self.registry.all()}
-        if cmd_name not in valid_commands:
+        if cmd_name not in self.registry.commands:
             raise ValueError(f"Invalid command {cmd_name}")
 
-        is_callback = cmd_name in {"OK", "ERR", "DATA"}
-        requires_callback = not is_callback and cmd_name not in {"BYE", "INIT"}
+        is_callback = cmd_name in self.registry.callback_commands
+        requires_callback = cmd_name in self.registry.requires_callback
 
         if self.shutdown_trigger.is_set() and cmd_name != "BYE":
             return None
@@ -291,12 +278,6 @@ class Server(ServerBase):
             raise LockException(f"Unhandled exception: {str(e)}")
 
     async def run(self, shutdown_trigger: asyncio.Event) -> None:
-        """
-        Run the cluster server.
-
-        Starts the server, initializes peer connections, monitors the cluster,
-        and handles graceful shutdown when shutdown_trigger is set.
-        """
         self.server = await asyncio.start_server(
             self.incoming_handler,
             self.peers.local.server_bindings,
@@ -306,7 +287,6 @@ class Server(ServerBase):
         )
 
         self.shutdown_trigger = shutdown_trigger
-
         async with self.server:
             binds = [s.getsockname()[0] for s in self.server.sockets]
             for local_rbind in self.peers.local.server_bindings:
@@ -318,6 +298,7 @@ class Server(ServerBase):
             logger.info(f"Listening on {binds}")
 
             await self.send_command("INIT", "*")
+            self._init_completed.set()
 
             asyncio.create_task(self.watchdog.server(), name="tickets")
 
@@ -342,7 +323,7 @@ class Server(ServerBase):
                 results = await asyncio.gather(*self.tasks, return_exceptions=True)
 
                 if not all(
-                    isinstance(e, asyncio.CancelledError) or e == None for e in results
+                    isinstance(e, asyncio.CancelledError) or e is None for e in results
                 ):
                     logger.error(results)
 

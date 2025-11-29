@@ -1,7 +1,9 @@
 from components.models.assets import Asset
 from components.models.coords import Location
+from components.models.markers import CarMarker
 from components.models.helpers import (
-    to_asset_from_str,
+    to_assets,
+    to_car_markers,
     to_bool,
     to_int,
     to_location,
@@ -61,9 +63,12 @@ class ObjectCarData:
     model: str | None = None
     year: int | None = None
     assigned_project: str | None = None
+    car_markers: list[CarMarker, dict, str] | CarMarker | dict | str = field(
+        default_factory=list
+    )
     location: Location | dict | None = None
     notes: str | None = None
-    assets: list[Asset | dict | None] | str = field(default_factory=list)
+    assets: list[Asset | dict | str | None] | Asset | dict | str | None = None
 
 
 @dataclass
@@ -190,7 +195,7 @@ class ObjectCar(ObjectCarData, BaseObjectTemplate):
                 f"'vin' must be non-empty string, got {type(self.vin).__name__}",
             )
         self.vin = to_str(self.vin.strip())
-        if not VINProcessor.validate_vin(self.vin):
+        if not VINProcessor.validate(self.vin):
             raise ValueError("vin", "'vin' is not a valid VIN")
 
         if self.vendor is not None and not isinstance(self.vendor, str):
@@ -220,29 +225,11 @@ class ObjectCar(ObjectCarData, BaseObjectTemplate):
                 f"'notes' must be string or None, got {type(self.notes).__name__}",
             )
 
+        if self.car_markers:
+            self.car_markers = to_car_markers(self.car_markers)
+
         if self.assets:
-            if isinstance(self.assets, str):
-                self.assets = to_asset_from_str(self.assets)
-            elif not isinstance(self.assets, list):
-                raise TypeError(
-                    "assets",
-                    f"'assets' must be list or JSON string, got {type(self.assets).__name__}",
-                )
-            else:
-                assets = []
-                for a in self.assets:
-                    if isinstance(a, dict):
-                        assets.append(Asset(**a))
-                    elif isinstance(a, Asset):
-                        assets.append(a)
-                    elif isinstance(a, str):
-                        assets.append(to_asset_from_str(a))
-                    else:
-                        raise TypeError(
-                            "assets",
-                            "All items in 'assets' must be of type Asset, dict or JSON string",
-                        )
-                self.assets = assets
+            self.assets = to_assets(self.assets)
 
 
 model_meta = {
@@ -264,9 +251,8 @@ model_meta = {
             "cars": ["vin", "assigned_project"],
             "projects": ["name"],
         },
-        "display_name": {
+        "display_attr": {
             "cars": "vin",
-            "projects": "name",
         },
         "system_fields": {
             "cars": ["assigned_users"],

@@ -1,6 +1,5 @@
-from config import defaults
 from components.utils.misc import ensure_list
-from components.models.helpers import *
+from components.models.helpers import to_str, to_int
 from dataclasses import dataclass, field
 from config.defaults import TABLE_PAGE_SIZE
 
@@ -9,14 +8,14 @@ from config.defaults import TABLE_PAGE_SIZE
 class TableSearch:
     q: str = ""
     page: str | int = 1
-    page_size: str | int = defaults.TABLE_PAGE_SIZE
+    page_size: str | int = TABLE_PAGE_SIZE
     sorting: str | tuple = ("id", True)
     filters: str | list | dict = field(default_factory=dict)
 
     def __post_init__(self):
         self.q = to_str(self.q)
         self.page = to_int(self.page) or 1
-        self.page_size = to_int(self.page_size) or defaults.TABLE_PAGE_SIZE
+        self.page_size = to_int(self.page_size) or TABLE_PAGE_SIZE
         self.sorting = self._split_sorting(self.sorting)
         self.filters = self._filters_formatter(self.filters)
 
@@ -40,6 +39,8 @@ class TableSearch:
 
         filters = {}
         for f in ensure_list(v):
+            if f == "":
+                continue
             key_name, key_value = f.split(":", 1)
             if key_name not in filters:
                 filters[key_name] = key_value

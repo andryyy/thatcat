@@ -5,16 +5,13 @@
 {% block menu %}
 {% endblock menu %}
 
-{% block breadcrumb %}
-{% endblock breadcrumb %}
-
 {% block body %}
 <article class="login-mask" _="on proxyAuthSuccess from body
     put '<center>{{ L["Thank you"] }} 👍</center>' into me
   end">
   <h5>{{ L["Confirm sign-in request"] }}</h5>
   <p>{{ L["Authenticating as"] }} <mark>{{ login|e }}</mark></p>
-  <p>{{ L["If you are already logged in, your session will be upheld and not replaced by the current authentication process."] }}</p>
+  <p>{{ L["Your session, if any, will be upheld and not replaced by the current authentication process"] }}</p>
   <form _="install login">
     <fieldset>
       <button type="submit"

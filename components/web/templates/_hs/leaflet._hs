@@ -1,5 +1,9 @@
 behavior selectFromLeaflet(formId, loc)
+  on intersection(intersecting) having threshold 0.1
+    trigger initStart on me unless not intersecting
+  end
   init
+    wait for initStart from me
     put `<mark class="hidden leaflet-project-name"></mark>` into .leaflet-map in me
     set :markers to {}
     if not loc
@@ -44,6 +48,8 @@ behavior selectFromLeaflet(formId, loc)
       call :map.removeLayer(:currentPositionMarker)
       set :currentPositionMarker to null
     end
+    set :searchQ to null
+    set value of (.leaflet-search-query in me) to ''
     add @disabled to .leaflet-search-query in me
     add @disabled to .leaflet-current-position in me
     add @disabled to <input/> in .leaflet-additional-markers in me
@@ -57,8 +63,10 @@ behavior selectFromLeaflet(formId, loc)
     call :map.keyboard.disable()
   end
 
-  on keydown[keyCode == 13] from (.leaflet-search-query in me) throttled at 1s queue none
+  on keydown[keyCode==13] or keydown[keyCode==9] from (.leaflet-search-query in me) queue none
     halt the event's bubbling
+    if :searchQ == event.target's value halt the event exit end
+    set :searchQ to event.target's value
     add @disabled to event.target
     set searchQuery to event.target's value
     if searchQuery
@@ -162,6 +170,8 @@ behavior selectFromLeaflet(formId, loc)
         put res into .leaflet-marker-name in me
         set value of (.input-display-name in me) to res
       end
+    else
+      put name into .leaflet-marker-name in me
     end
     set value of (.input-lat in me) to lat
     set value of (.input-lon in me) to lon

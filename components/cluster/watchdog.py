@@ -1,17 +1,20 @@
 import asyncio
-import ssl
 
 from components.logs import logger
+from .models import Role, ErrorMessages
 
 
 class Watchdog:
-    def __init__(self, cluster: "Server"):
+    def __init__(self, cluster: "Server"):  # noqa: F821
         self.cluster = cluster
 
     async def server(self):
+        from components.database import db
+
+        db_sync_required = False
+        self.cluster.peers.leader_election()
         while not self.cluster.shutdown_trigger.is_set():
-            await asyncio.sleep(1)
-            if not self.cluster.peers.local.cluster_complete.is_set():
+            if not self.cluster.peers.peers_consistent():
                 try:
                     for peer, data in self.cluster.peers.remotes.items():
                         if data.established:
@@ -23,13 +26,32 @@ class Watchdog:
                 except Exception as e:
                     logger.warning(e)
                 finally:
-                    await self.cluster.peers.leader_election()
+                    self.cluster.peers.leader_election()
+                    if self.cluster.peers.local.role == Role.FOLLOWER:
+                        db_sync_required = True
 
-    async def _peer_worker(self, name):
+            elif db_sync_required:
+                ret, resp = await self.cluster.send_command(
+                    "DBSYNCREQ",
+                    self.cluster.peers.local.leader,
+                    raise_err=False,
+                )
+                if ret:
+                    async with db:
+                        await db.sync_in(resp[self.cluster.peers.local.leader])
+                    db_sync_required = False
+                else:
+                    if resp[self.cluster.peers.local.leader] == ErrorMessages.NOT_READY:
+                        logger.warning("Leader is not ready; retrying")
+                    else:
+                        logger.error("Could not request database from leader")
+
+            await asyncio.sleep(0.8)
+
+    async def _peer_worker(self, peer):
         failures = 0
         while failures < 5:
             try:
-                peer = self.cluster.peers.remotes[name]
                 ireader, iwriter = peer.streams.ingress
                 ereader, ewriter = peer.streams.egress
 
@@ -52,13 +74,11 @@ class Watchdog:
                 await asyncio.sleep(0.5)
 
             except asyncio.CancelledError:
-                logger.info(f"Stopping monitoring of {name}")
-                if self.cluster.shutdown_trigger.is_set():
-                    raise
-                break
+                logger.info(f"Watchdog of {peer.name} was cancelled")
+                raise
             except TimeoutError:
                 failures += 1
-                logger.warning(f"{name} is failing [{'#' * failures: <5}]")
+                logger.warning(f"{peer.name} is failing [{'#' * failures: <5}]")
                 continue
             except (
                 AssertionError,
@@ -66,35 +86,15 @@ class Watchdog:
                 BrokenPipeError,
                 ConnectionAbortedError,
                 asyncio.exceptions.IncompleteReadError,
-            ):
-                logger.error(f"{name} failed")
+            ) as e:
+                logger.error(f"{peer.name} failed: {e}")
                 break
 
-        try:
-            iwriter.close()
-            async with asyncio.timeout(0.1):
-                await iwriter.wait_closed()
-        except:
-            pass
+        await self.cluster.peers.disconnect(peer.name)
 
-        try:
-            ewriter.close()
-            async with asyncio.timeout(0.1):
-                await ewriter.wait_closed()
-            await ewriter.wait_closed()
-        except:
-            pass
-
-        logger.info(f"Removing {name}")
-        async with peer.lock:
-            peer.streams.ingress = None
-            peer.streams.egress = None
-            peer.meta = None
-            await self.cluster.peers.leader_election()
-
-    async def peer(self, name):
-        logger.info(f"Monitoring {name}")
-        await self.cluster.peers.leader_election()
-        t = asyncio.create_task(self._peer_worker(name), name=name)
+    async def peer(self, peer):
+        logger.info(f"Monitoring {peer.name}")
+        self.cluster.peers.leader_election()
+        t = asyncio.create_task(self._peer_worker(peer), name=peer.name)
         self.cluster.tasks.add(t)
         t.add_done_callback(self.cluster.tasks.discard)

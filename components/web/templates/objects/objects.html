@@ -2,16 +2,6 @@
   {% extends "base.html" %}
 {% endif %}
 
-{% block breadcrumb %}
-<nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
-  <ul>
-    <li><span>{{ L["Objects"] }}</span></li>
-    <li><a href="#" hx-target="#body-main" hx-get="/objects">{{ L["Categories"] }}</a></li>
-    <li><a href="#" hx-target="#body-main" hx-get="{{ request.path }}">{{ L[request.view_args.get("object_type")|capitalize] }}</a></li>
-  </ul>
-</nav>
-{% endblock breadcrumb %}
-
 {% block body %}
 
 <h5>{{ L[request.view_args.get("object_type")|capitalize] }}</h5>

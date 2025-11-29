@@ -9,16 +9,21 @@ def trigger_notification(
     level: str,  # "error", "warning", "success", "user", "system"
     response_code: int,
     title: str,
-    message: str,
+    message: str | tuple,
     response_body: str = "",
     duration: int = 7000,
     additional_triggers: dict = {},
 ):
+    if isinstance(message, tuple):
+        message, *message_params = message
+    else:
+        message_params = [""]
+
     logger_payload = {
         "level": level,
         "response_code": response_code,
         "title": title,
-        "message": message,
+        "message": message.format(*message_params),
         "additional_triggers": {k: "*" for k in additional_triggers},
     }
 
@@ -39,7 +44,9 @@ def trigger_notification(
                     "notification": {
                         "level": level,
                         "title": LANG[request.USER_LANG][title],
-                        "message": LANG[request.USER_LANG][message],
+                        "message": LANG[request.USER_LANG][message].format(
+                            *message_params
+                        ),
                         "duration": duration,
                     },
                     **additional_triggers,
@@ -54,19 +61,19 @@ def validation_error(
 ):
     locations = []
     if errors:
-        for loc in [l.get("loc") for l in errors if l.get("loc")]:
+        for loc in [_loc.get("loc") for _loc in errors if _loc.get("loc")]:
             i = 1
             _location = None
             if len(loc) > 1:
                 while len(loc) > i:
                     if not _location:
-                        if not "[" in loc[1]:
+                        if "[" not in loc[1]:
                             _location = f"{loc[0]}.{loc[1]}"
                         else:
                             _location = f"{loc[0]}"
                         i = 2
                     else:
-                        if not "[" in str(loc[i]):
+                        if "[" not in str(loc[i]):
                             # Remove locations that are also specified with an index
                             # This prevents highlighting
                             if isinstance(loc[i], int) and _location in locations:
@@ -82,9 +89,9 @@ def validation_error(
 
         error_msgs = list(
             set(
-                l.get("msg").removeprefix("Value error, ")
-                for l in errors
-                if l.get("msg")
+                _loc.get("msg").removeprefix("Value error, ")
+                for _loc in errors
+                if _loc.get("msg")
             )
         )
         if not error_msgs:

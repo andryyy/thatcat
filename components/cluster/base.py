@@ -5,15 +5,16 @@ import string
 from contextlib import suppress
 
 from components.logs import logger
-from components.models.cluster import (
-    ErrorMessages,
-    IncomingData,
-    MetaData,
-    READER_DATA_PATTERN,
-)
+from .models import ErrorMessages, IncomingData, MetaData, READER_DATA_PATTERN
 from components.utils.datetimes import ntime_utc_now
 from components.utils.misc import unique_list, ensure_list
-from .exceptions import ClusterException, LockException, IncomingDataError
+from .exceptions import (
+    ClusterException,
+    LockException,
+    IncomingDataError,
+    MetaDataError,
+    ServerNotRunning,
+)
 
 # Constants
 ALPHABET = string.ascii_lowercase + string.digits
@@ -84,7 +85,7 @@ class ServerBase:
                 await asyncio.sleep(LOCK_RETRY_DELAY)
                 continue
             elif not result:
-                if ErrorMessages.PEERS_MISMATCH in responses.values():
+                if ErrorMessages.NOT_READY in responses.values():
                     raise LockException("Lock rejected due to inconsistency")
                 else:
                     raise LockException(
@@ -96,13 +97,11 @@ class ServerBase:
             raise LockException("Cannot acquire lock: timeout")
 
     def _incoming_parser(self, input_bytes: bytes) -> IncomingData:
-        """Parse incoming message bytes into structured data."""
         try:
             input_decoded = input_bytes.strip().decode("utf-8")
             match = READER_DATA_PATTERN.search(input_decoded)
             if not match:
                 raise ValueError("Message does not match expected pattern")
-
             data = match.groupdict()
             return IncomingData(
                 ticket=data["ticket"],
@@ -112,6 +111,7 @@ class ServerBase:
                     cluster=data["cluster"],
                     leader=data["leader"],
                     started=data["started"],
+                    state=data["state"],
                     name=data["name"],
                 ),
             )
@@ -119,24 +119,16 @@ class ServerBase:
             logger.critical(f"Failed to parse incoming data: {e}")
             raise IncomingDataError(e)
 
-    async def _validate_and_setup_peer(self, peer, raddr, data: IncomingData) -> bool:
-        """Validate peer metadata and establish egress connection if needed."""
+    def _peer_meta_update(self, peer, data: IncomingData) -> bool:
         if data.meta.name != peer.name:
-            raise Exception(f"Expected {data.meta.name}, got {peer.name}")
-
-        if not peer.streams.egress:
-            con, status = await self.peers.connect(data.meta.name)
-            if not con:
-                raise Exception(f"Error connecting {data.meta.name}: {status}")
+            raise MetaDataError(f"Expected {data.meta.name}, got {peer.name}")
 
         if peer.meta and (float(data.meta.started) < float(peer.meta.started)):
-            raise Exception(f"Inplausible started stamp from {data.meta.name}")
+            raise MetaDataError(f"Inplausible started stamp from {data.meta.name}")
 
         peer.meta = data.meta
-        return True
 
     async def _process_command(self, data: IncomingData, peer_name: str):
-        """Dispatch command to appropriate plugin and send reply if needed."""
         for plugin in self.registry.all():
             if data.cmd == plugin.name:
                 reply_command = await plugin.dispatch(self, data)
@@ -162,9 +154,6 @@ class ServerBase:
         raise_err: bool,
         timeout: float,
     ):
-        """Validate send_command parameters."""
-        from .exceptions import ServerNotRunning
-
         if not self.shutdown_trigger:
             raise ServerNotRunning(self.shutdown_trigger)
 
@@ -180,7 +169,6 @@ class ServerBase:
             raise ValueError("timeout must be a float or int")
 
     def _build_message_buffer(self, ticket: str, cmd_name: str, payload: str) -> bytes:
-        """Build the message buffer to send to peers."""
         buffer_data = [
             ticket,
             f"{cmd_name} {payload}",
@@ -188,6 +176,7 @@ class ServerBase:
             f"NAME {self.peers.local.name}",
             f"CLUSTER {self.peers.local.cluster or '?CONFUSED'}",
             f"STARTED {self.peers.local.started}",
+            f"STATE {self.peers.local.cluster_state.value}",
             f"LEADER {self.peers.local.leader or '?CONFUSED'}",
         ]
         return " ".join(buffer_data).encode("utf-8")

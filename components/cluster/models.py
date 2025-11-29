@@ -1,13 +1,11 @@
 import asyncio
 import re
 
-from components.cluster.ssl import get_ssl_context
 from components.utils.datetimes import ntime_utc_now
 from components.utils.misc import unique_list, ensure_list
 from config import defaults
-from contextlib import closing
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, auto
 
 
 READER_DATA_PATTERN = re.compile(
@@ -18,22 +16,34 @@ READER_DATA_PATTERN = re.compile(
     r"NAME\s(?P<name>\S+)\s+"
     r"CLUSTER\s(?P<cluster>\S+)\s+"
     r"STARTED\s(?P<started>\S+)\s+"
+    r"STATE\s(?P<state>\S+)\s+"
     r"LEADER\s(?P<leader>\S+)"
 )
 
 
 class Role(Enum):
-    LEADER = 1
-    FOLLOWER = 2
+    LEADER = auto()
+    FOLLOWER = auto()
 
 
 class ConnectionStatus(Enum):
-    CONNECTED = 0
-    REFUSED = 1
-    SOCKET_REFUSED = 2
-    ALL_AVAILABLE_FAILED = 3
-    OK = 4
-    OK_WITH_PREVIOUS_ERRORS = 5
+    CONNECTED = auto()
+    REFUSED = auto()
+    SOCKET_REFUSED = auto()
+    ALL_AVAILABLE_FAILED = auto()
+    OK = auto()
+    OK_WITH_PREVIOUS_ERRORS = auto()
+    RESET = auto()
+    UNKNOWN_ERROR = auto()
+
+
+class ClusterState(Enum):
+    COMPLETE = auto()
+    CONSISTENT_WITH_MISSING = auto()
+    INCONSISTENT = auto()
+    NO_QUORUM = auto()
+    NONE = auto()
+    ELECTING = auto()
 
 
 class ErrorMessages(Enum):
@@ -42,7 +52,6 @@ class ErrorMessages(Enum):
     LOCK_ERROR = "LOCK_ERROR"
     NOT_READY = "NOT_READY"
     SYNC_ERROR = "SYNC_ERROR"
-    PEERS_MISMATCH = "PEERS_MISMATCH"
     START_BEHIND_FILE_END = "START_BEHIND_FILE_END"
     UNKNOWN_COMMAND = "UNKNOWN_COMMAND"
     COMMAND_FAILED = "COMMAND_FAILED"
@@ -58,18 +67,17 @@ class MetaData:
     cluster: str | None = None
     leader: str | None = None
     started: str | int | float | None = None
+    state: str | int | ClusterState = ClusterState.NONE
     name: str | None = None
 
     def __bool__(self) -> bool:
         for k in self.__dict__.keys():
-            if getattr(self, k) is not None:
+            if getattr(self, k) not in [None, ClusterState.NONE]:
                 return True
         return False
 
     def __post_init__(self):
-        if self.name is not None and self.name not in [
-            _["name"] for _ in defaults.CLUSTER_PEERS
-        ]:
+        if self.name is not None and self.name not in defaults.CLUSTER_PEERS:
             raise ValueError("Invalid peer name")
         if self.leader == "?CONFUSED":
             self.leader = None
@@ -77,6 +85,10 @@ class MetaData:
             self.cluster = None
         if self.started is not None:
             self.started = float(self.started)
+        if isinstance(self.state, (str, int)):
+            self.state = ClusterState._value2member_map_.get(
+                int(self.state), ClusterState.NONE
+            )
 
 
 @dataclass
@@ -97,7 +109,7 @@ class LocalPeer:
     role: Role = Role.FOLLOWER
     cluster: str = ""
     started: float = field(default_factory=ntime_utc_now)
-    cluster_complete: asyncio.Event = field(default_factory=asyncio.Event)
+    cluster_state: ClusterState = ClusterState.NONE
 
     def __post_init__(self):
         if not self.ip4 and not self.ip6:

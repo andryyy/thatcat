@@ -1,10 +1,8 @@
-import asyncio
 import random
 
 from .plugin import CommandPluginLeader
 from components.logs import logger
-from components.models.cluster import ErrorMessages
-from contextlib import suppress
+from ..models import ErrorMessages
 
 
 class LockCommand(CommandPluginLeader):
@@ -19,7 +17,7 @@ class LockCommand(CommandPluginLeader):
         except TimeoutError:
             return "OK BUSY"
         except Exception as e:
-            logger.critical(f"Unhandled LOCK error: {str(e)}")
+            logger.critical(f"Unhandled LOCK error: {str(e)}", exc_info=True)
             return ErrorMessages.LOCK_ERROR.response
         else:
             return "OK"

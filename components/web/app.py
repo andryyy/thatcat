@@ -68,7 +68,7 @@ async def handle_cluster_error(error):
     return trigger_notification(
         level="error",
         response_body="",
-        response_code=999,
+        response_code=503,
         title="Cluster error",
         message=str(error),
     )

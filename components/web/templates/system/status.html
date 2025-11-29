@@ -2,15 +2,6 @@
   {% extends "base.html" %}
 {% endif %}
 
-{% block breadcrumb %}
-<nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
-  <ul>
-    <li><span>System</span></li>
-    <li><a href="#" hx-target="#body-main" hx-get="{{ request.path }}">Status</a></li>
-  </ul>
-</nav>
-{% endblock breadcrumb %}
-
 {% block body %}
 
 <h5>System Status - <a href="#" class="no-text-decoration"
@@ -31,17 +22,7 @@
       <h6>{{ data.status.CLUSTER_PEERS_LOCAL.name }} <span class="color-blue-400">This node</span></h6>
       <ul>
       {% for field in data.status.CLUSTER_PEERS_LOCAL.__dataclass_fields__ %}
-        <li><span class="color-zinc-600">{{ field.split("_")|join(" ")|capitalize }}</span>:
-        {% if field == "cluster_complete" %}
-          {% if not data.status.CLUSTER_PEERS_LOCAL[field].is_set() %}
-          <span class="color-red">Cluster incomplete</span>
-          {% else %}
-          OK
-          {% endif %}
-        {% else %}
-          {{ data.status.CLUSTER_PEERS_LOCAL[field] }}
-        {% endif %}
-        </li>
+        <li><span class="color-zinc-600">{{ field.split("_")|join(" ")|capitalize }}</span>: {{ data.status.CLUSTER_PEERS_LOCAL[field] }}</li>
       {% endfor %}
       </ul>
     </article>

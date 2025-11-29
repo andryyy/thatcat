@@ -6,9 +6,10 @@ from config.defaults import (
     CLUSTER_SELF,
 )
 
+
 logger = log.Logger()
 logger.add(
-    f"logs/application.log",
+    "logs/application.log",
     level=LOG_LEVEL,
     colorize=False,
     max_size_mb=LOG_FILE_ROTATION,

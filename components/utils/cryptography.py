@@ -8,7 +8,6 @@ from cryptography.fernet import InvalidToken
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives import padding
-from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from functools import lru_cache
@@ -76,7 +75,7 @@ def aes_cbc_decrypt(data: bytes, code: str) -> str:
     return plaintext.decode(encoding="utf-8")
 
 
-def fernet_encrypt(data: str, code: str, salt: bytes = os.urandom(16)) -> bytes:
+def fernet_encrypt(data: str | bytes, code: str, salt: bytes = os.urandom(16)) -> str:
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
@@ -84,6 +83,10 @@ def fernet_encrypt(data: str, code: str, salt: bytes = os.urandom(16)) -> bytes:
         iterations=100000,
         backend=default_backend(),
     )
+    if isinstance(data, str):
+        data = data.encode("utf-8")
+    elif not isinstance(data, bytes):
+        raise ValueError("'data' must be str or bytes")
     fernet = Fernet(
         base64.urlsafe_b64encode(kdf.derive(code.encode("utf-8"))),
     )
@@ -91,7 +94,7 @@ def fernet_encrypt(data: str, code: str, salt: bytes = os.urandom(16)) -> bytes:
 
 
 @lru_cache
-def fernet_decrypt(data: str, code: str) -> str:
+def fernet_decrypt(data: str, code: str) -> bytes:
     data = base64.urlsafe_b64decode(data)
     salt = data[:16]
     encrypted_data = data[16:]
@@ -103,4 +106,4 @@ def fernet_decrypt(data: str, code: str) -> str:
         backend=default_backend(),
     )
     fernet = Fernet(base64.urlsafe_b64encode(kdf.derive(code.encode("utf-8"))))
-    return fernet.decrypt(encrypted_data).decode(encoding="utf-8")
+    return fernet.decrypt(encrypted_data)

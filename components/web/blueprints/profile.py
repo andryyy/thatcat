@@ -2,8 +2,9 @@ from quart import Blueprint, redirect, render_template, request, session, url_fo
 from components.web.utils.wrappers import acl, session_clear
 from components.web.utils.notifications import trigger_notification
 from components.database import db
-from components.models.users import User, UserProfilePatch
-from dataclasses import asdict, replace
+from components.models.users import User
+from components.models.profile import UserProfilePatch
+from dataclasses import asdict
 
 
 blueprint = Blueprint("profile", __name__, url_prefix="/profile")
@@ -30,27 +31,28 @@ async def user_profile_patch():
     except Exception:
         viewer_doc_version = -1
 
+    patch_data = UserProfilePatch(**request.form_parsed)
+
     async with db:
         user = await db.get("users", session["id"])
         user = User(**user)
-        patch_data = UserProfilePatch(**request.form_parsed)
-        user.profile = replace(user.profile, **patch_data.dump_patched())
-        user_dict = asdict(user)
+        user.profile = patch_data.merge(user.profile)
+        profile_dict = asdict(user.profile)
 
         trigger = {}
-        if session["profile"]["vault"] != user_dict["profile"]["vault"]:
-            trigger = {"profileUpdate": {"vault": user_dict["profile"]["vault"]}}
+        if session["profile"]["vault"] != profile_dict["vault"]:
+            trigger = {"profileUpdate": {"vault": profile_dict["vault"]}}
 
-        session["profile"]["vault"] = user_dict["profile"]["vault"]
+        session["profile"]["vault"] = profile_dict["vault"]
         await db.patch(
             "users",
             session["id"],
-            {"profile": user_dict["profile"]},
+            {"profile": profile_dict},
             base_version=viewer_doc_version,
         )
 
     session.pop("profile", None)
-    session["profile"] = user_dict["profile"]
+    session["profile"] = profile_dict
 
     return trigger_notification(
         level="success",

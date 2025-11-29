@@ -18,11 +18,20 @@ SECRET_KEY = os.getenv("SESSION_SECRET", "im-insecure")  # can be overridden by 
 TLS_CERTFILE = "system/certs/fullchain.pem"
 TLS_KEYFILE = "system/certs/privkey.pem"
 TLS_CA = "/etc/ssl/certs/ca-certificates.crt"
-CLUSTER_PEERS = [
-    {"name": "de.kerker.io", "ip4": "2.58.53.49", "nat_ip4": "45.86.125.5"},
-    {"name": "arm-2", "ip4": "37.27.93.56", "ip6": "2a01:4f9:c012:7d9d::1"},
-    {"name": "4th", "ip4": "188.245.202.111"},
-]
+CLUSTER_PEERS = {
+    "de.kerker.io": {
+        "ip4": "2.58.53.49",
+        "nat_ip4": "45.86.125.5",
+    },
+    "arm-2": {
+        "ip4": "37.27.93.56",
+        "ip6": "2a01:4f9:c012:7d9d::1",
+    },
+    "4th": {
+        "ip4": "188.245.202.111",
+        "ip6": "2a01:4f8:c17:9023::1",
+    },
+}
 CLUSTER_SELF = {
     "name": "debian-4gb-nbg1-2",
     "ip4": "162.55.49.111",
@@ -32,3 +41,4 @@ CLUSTER_CLI_BINDINGS = ["127.0.0.1", "::1"]
 CLUSTER_PEERS_TIMEOUT = 1.25
 OSM_EMAIL = "andre.peters@debinux.de"
 CLAUDE_DEFAULT_MODEL = "claude-sonnet-4-5"
+DISABLE_CLUSTER_QUORUM = False

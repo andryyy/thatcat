@@ -23,9 +23,23 @@ async def load_context():
     }
 
 
-@blueprint.route("/", methods=["GET"])
+@blueprint.route("/")
 @acl(["user"])
-@formoptions(["projects"])
+async def upload():
+    return await render_template("processings/overview.html")
+
+
+@blueprint.route("/tasks")
+@acl(["user"])
+async def tasks():
+    return await render_template(
+        "processings/tasks.html", processings_count=len(db.ids("processings"))
+    )
+
+
+@blueprint.route("/search", methods=["POST"])
+@acl(["user"])
+@formoptions(["projects", "users"])
 async def get_incomplete():
     async with db:
         rows = await db.list_rows(
@@ -43,7 +57,8 @@ async def get_incomplete():
         )
 
         rows["items"] = [
-            await db.get("processings", item["id"]) for item in rows["items"]
+            Processing(**await db.get("processings", item["id"]))
+            for item in rows["items"]
         ]
 
     return await render_or_json(
@@ -51,28 +66,11 @@ async def get_incomplete():
     )
 
 
-@blueprint.route("/processing/<processing_id>", methods=["GET"])
+@blueprint.route("/finalize/<processing_id>", methods=["POST"])
 @acl(["user"])
-@formoptions(["projects"])
-async def get_processing(processing_id):
+async def finalize_processing(processing_id):
     async with db:
         processing = await db.get("processings", processing_id)
-    if not processing:
-        return trigger_notification(
-            level="error",
-            response_code=404,
-            title="Processing unknown",
-            message="Processing not found",
-        )
-
-    return await render_template("processings/processing.html", processing=processing)
-
-
-@blueprint.route("/processing/finalize", methods=["POST"])
-@acl(["user"])
-async def finalize_processing():
-    async with db:
-        processing = await db.get("processings", request.form_parsed["id"])
 
     if not processing:
         return trigger_notification(
@@ -107,7 +105,7 @@ async def finalize_processing():
     return "", 204, {"HX-Trigger": json.dumps({"removeProcessing": processing_data.id})}
 
 
-@blueprint.route("/upload/process", methods=["POST"])
+@blueprint.route("/upload", methods=["POST"])
 @acl(["user"])
 @formoptions(["projects"])
 async def process_upload():
@@ -116,17 +114,16 @@ async def process_upload():
         if not vin_extractor:
             return
 
-        response = await vin_extractor(settings).extract(file_bytes)
-
+        results = await vin_extractor(settings).extract(file_bytes, filename=filename)
         async with db:
-            for vin in response.vins:
+            for result in results:
                 processing_data = ProcessingAdd(
                     **{
-                        "vin": vin,
+                        "vin": result.vin,
                         "location": None,
-                        "metadata": response.metadata,
+                        "metadata": result.metadata,
                         "assigned_user": session["id"],
-                        "assets": [response.asset] if response.asset else [],
+                        "assets": [result.asset] if result.asset else [],
                     }
                 )
                 await db.upsert(
@@ -136,11 +133,10 @@ async def process_upload():
                 )
 
     files = await request.files
+    form = await request.form
+
     image_files = files.getlist("images")
     data_files = files.getlist("files")
-
-    # Get text data from form
-    form = await request.form
     text_data = form.get("text_data", "").strip()
 
     async with db:
@@ -172,16 +168,24 @@ async def process_upload():
         STATE.queued_user_tasks[session["id"]].add(t)
         t.add_done_callback(STATE.queued_user_tasks[session["id"]].discard)
 
-    return await render_template("processings/tasks.html")
+    return await render_template(
+        "processings/tasks.html", processings_count=len(db.ids("processings"))
+    )
 
 
-@blueprint.route("/upload")
+@blueprint.route("/item/<processing_id>", methods=["GET"])
 @acl(["user"])
-async def upload():
-    return await render_template("processings/upload.html", data={})
+@formoptions(["projects", "users"])
+async def get_processing(processing_id):
+    async with db:
+        processing = await db.get("processings", processing_id)
+        processing = Processing(**processing)
+    if not processing:
+        return trigger_notification(
+            level="error",
+            response_code=404,
+            title="Processing unknown",
+            message="Processing not found",
+        )
 
-
-@blueprint.route("/tasks")
-@acl(["user"])
-async def tasks():
-    return await render_template("processings/tasks.html")
+    return await render_template("processings/processing.html", processing=processing)

@@ -13,7 +13,6 @@ mime = Magic(mime=True)
 @dataclass
 class Asset:
     id: str
-    mime_type: str
     filename: str | None = None
     overlay: str | None = None
 
@@ -28,39 +27,59 @@ class Asset:
         if self.overlay:
             self.overlay = to_str(self.overlay.strip()) or None
 
-        self.mime_type = to_str(self.mime_type.strip())
-        if not self.mime_type:
-            raise ValueError("mime_type", "'mime_type' must be a non-empty string")
+    @property
+    def mime_type(self) -> str:
+        try:
+            return mime.from_file(f"assets/{self.id}")
+        except Exception:
+            return "application/octet-stream"
+
+    def as_bytes(self) -> bytes:
+        asset_path = f"assets/{self.id}"
+        with open(asset_path, "rb") as f:
+            return f.read()
 
     @classmethod
-    async def create_from_bytes(cls, data: bytes, **kwargs) -> "Asset":
+    async def from_bytes(cls, data_bytes: bytes, **kwargs) -> "Asset":
         from components.utils.images import convert_image_to_webp
+        from components.logs import logger
 
-        _fwrite = False
-        if not isinstance(data, bytes):
-            raise ValueError("'data' must be bytes")
+        if not isinstance(data_bytes, bytes):
+            raise ValueError("'data_bytes' must be bytes")
 
-        id_ = validate_uuid_str(kwargs.get("id", str(uuid4())))
-        mime_type = mime.from_buffer(data)  # do not rely on user input
-        filename = kwargs.pop("filename", id_)
+        asset_id = validate_uuid_str(kwargs.get("id", str(uuid4())))
+        asset_path = f"assets/{asset_id}"
+
+        with open(asset_path, "wb") as f:
+            f.write(data_bytes)
+
+        filename = kwargs.pop("filename", asset_id)
         overlay = kwargs.pop("overlay", None)
-        cluster = kwargs.pop("cluster", None)
+        cluster = kwargs.pop("cluster", None)  # Offline peers will request on demand
         compress = kwargs.pop("compress", False)
-        asset = Asset(id=id_, mime_type=mime_type, filename=filename, overlay=overlay)
-        asset_path = f"assets/{asset.filename}"
+
+        asset = Asset(id=asset_id, filename=filename, overlay=overlay)
 
         if compress:
-            if mime_type.startswith("image/") and mime_type != "image/webp":
-                _fwrite = True
-                await asyncio.to_thread(
-                    convert_image_to_webp,
-                    image=data,
-                    save_as=asset_path,
-                    quality=100,
+            loseless = kwargs.pop("loseless", True)
+            quality = kwargs.pop("quality", 90)
+            try:
+                if (
+                    asset.mime_type.startswith("image/")
+                    and asset.mime_type != "image/webp"
+                ):
+                    compressed_bytes = await asyncio.to_thread(
+                        convert_image_to_webp,
+                        image=data_bytes,
+                        quality=quality,
+                        loseless=loseless,
+                    )
+                    with open(asset_path, "wb") as f:
+                        f.write(compressed_bytes)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to compress image {asset.filename} ({asset.id}): {e}"
                 )
-        if not _fwrite:
-            with open(asset_path, "wb") as f:
-                f.write(data)
 
         if cluster:
             ok_peers = set()

@@ -5,7 +5,7 @@ from components.models.helpers import (
     validate_uuid_str,
     to_int,
     to_location,
-    to_asset_from_str,
+    to_assets,
 )
 from components.utils.datetimes import utc_now_as_str
 from dataclasses import dataclass, field, asdict
@@ -23,7 +23,7 @@ class ProcessingBase:
 @dataclass
 class ProcessingData:
     assigned_user: str
-    assets: list[Asset | dict | None] | str = field(default_factory=list)
+    assets: list[Asset]
     location: Location | dict | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     vin: str | None = None
@@ -61,32 +61,10 @@ class Processing(ProcessingData, ProcessingBase):
                     f"'vin' must be non-empty string, got {type(self.vin).__name__}",
                 )
             self.vin = to_str(self.vin.strip())
-            if not VINProcessor.validate_vin(self.vin):
+            if not VINProcessor.validate(self.vin):
                 raise ValueError("vin", "'vin' is not a valid VIN")
 
-        if self.assets:
-            if isinstance(self.assets, str):
-                self.assets = to_asset_from_str(self.assets)
-            elif not isinstance(self.assets, list):
-                raise TypeError(
-                    "assets",
-                    f"'assets' must be list or JSON string, got {type(self.assets).__name__}",
-                )
-            else:
-                assets = []
-                for a in self.assets:
-                    if isinstance(a, dict):
-                        assets.append(Asset(**a))
-                    elif isinstance(a, Asset):
-                        assets.append(a)
-                    elif isinstance(a, str):
-                        assets.append(to_asset_from_str(a))
-                    else:
-                        raise TypeError(
-                            "assets",
-                            "All items in 'assets' must be of type Asset, dict or JSON string",
-                        )
-                self.assets = assets
+        self.assets = to_assets(self.assets)
 
 
 @dataclass

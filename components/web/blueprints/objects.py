@@ -77,6 +77,7 @@ async def overview():
 
 
 @blueprint.route("/<object_type>/<object_id>")
+@blueprint.route("/<object_type>/<object_id>/")
 @formoptions(["projects", "users"])
 async def get_object(object_type: str, object_id: str):
     return await render_or_json(
@@ -87,6 +88,7 @@ async def get_object(object_type: str, object_id: str):
 
 
 @blueprint.route("/<object_type>")
+@blueprint.route("/<object_type>/")
 @blueprint.route("/<object_type>/search", methods=["POST"])
 @formoptions(["projects", "users"])
 async def get_objects(object_type: str):
@@ -94,6 +96,9 @@ async def get_objects(object_type: str):
         q, page, page_size, sort_attr, sort_reverse, filters = table_search_helper(
             request.form_parsed, object_type, default_sort_attr="name"
         )
+        if sort_attr == "name":
+            sort_attr = model_meta["objects"]["display_attr"].get(object_type, "name")
+
         async with db:
             rows = await db.list_rows(
                 object_type,
@@ -155,12 +160,13 @@ async def create_object(object_type: str):
                 raise ValueError("assigned_project", "Project is not accessible")
 
         await db.upsert(object_type, upsert_data.id, asdict(upsert_data))
+        display_attr = model_meta["objects"]["display_attr"].get(object_type, "name")
 
     return trigger_notification(
         level="success",
         response_code=204,
         title="Completed",
-        message="Object created",
+        message=("Object {!r} created", getattr(upsert_data, display_attr)),
     )
 
 

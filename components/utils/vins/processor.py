@@ -6,7 +6,7 @@ import re
 
 class VINProcessor:
     @staticmethod
-    def extract_candidates(text: str) -> list:
+    def extract_from_text(text: str) -> list:
         text_upper = text.upper()
         candidates = set()  # Use set to automatically deduplicate candidates
 
@@ -24,59 +24,94 @@ class VINProcessor:
             if len(cleaned) == 17:
                 candidates.add(cleaned)
 
-        return list(candidates)
+        return VINProcessor._process_candidates(candidates)
 
     @staticmethod
-    def process_vin_candidates(candidates: list) -> tuple[list, str]:
-        processed_vins = set()
+    def _process_candidates(candidates: set) -> tuple[set, str]:
         corrections = {}
-
         for vin in candidates:
-            candidate = VINProcessor.process_vin(vin)
-            if candidate:  # If validation/correction succeeded
-                processed_vins.add(candidate)
-                if candidate not in corrections:
-                    corrections[candidate] = []
-                corrections[candidate].append(vin)
+            corrected_vin = VINProcessor._repair_and_validate(vin)
+            if corrected_vin and corrected_vin not in corrections:
+                corrections[corrected_vin] = vin
 
-        notes_parts = []
+        processed_vins = set(corrections.keys())
+
+        info_parts = []
         for corrected_vin in sorted(processed_vins):
-            originals = corrections[corrected_vin]
-            original = originals[0]
-            if corrected_vin != original:
-                notes_parts.append(f"{original} → {corrected_vin}")
-            else:
-                notes_parts.append(corrected_vin)
+            original_vin = corrections[corrected_vin]
+            if corrected_vin != original_vin:
+                info_parts.append(f"{original_vin} → {corrected_vin}")
 
-        notes = ", ".join(notes_parts) if notes_parts else "No valid VINs found"
-        return list(processed_vins), notes
+        return processed_vins, ", ".join(info_parts) if info_parts else ""
 
     @staticmethod
-    def process_vin(vin: str, max_combinations: int = 1000000):
+    def _repair_and_validate(vin: str, max_combinations: int = 1000000):
+        # 1. Global ILLEGAL fixes (O, Q, I are *never* valid in a VIN)
         ILLEGAL_CHAR_FIXES = {"O": "0", "Q": "0", "I": "1"}
+
+        # 2. Renamed map for common OCR errors (B/8, S/5, T/1)
+        #    This is used for the one-way fixes.
+        OCR_FIXES = {"B": "8", "S": "5", "T": "1"}
 
         vin = vin.strip().upper()
         if len(vin) != 17:
             return None
 
-        vin_cleaned = "".join(ILLEGAL_CHAR_FIXES.get(c, c) for c in vin)
+        # 3. Apply global fixes (O, Q, I) to the *entire* string
+        vin_cleaned_global = "".join(ILLEGAL_CHAR_FIXES.get(c, c) for c in vin)
 
-        if VINProcessor.validate_vin(vin_cleaned):
+        # 4. Apply the one-way OCR fixes *only* for position 9
+        pos_9_char = vin_cleaned_global[8]
+        vin_cleaned = (
+            vin_cleaned_global[:8]
+            + OCR_FIXES.get(pos_9_char, pos_9_char)  # Apply pos 9 fix
+            + vin_cleaned_global[9:]
+        )
+
+        # 5. Validate this "smarter" cleaned version
+        if VINProcessor.validate(vin_cleaned):
             return vin_cleaned
 
-        prefix = vin_cleaned[:11]
-        suffix = vin_cleaned[11:]
-        prefix_options = [
-            (["8", c] if c == "B" else ["B", c] if c == "8" else [c]) for c in prefix
-        ]
-        suffix_options = [(["8"] if c == "B" else [c]) for c in suffix]
+        # 6. If still invalid, proceed to brute-force
 
+        prefix = vin_cleaned[:12]
+        suffix = vin_cleaned[12:]
+
+        prefix_options = []
+        for i, c in enumerate(prefix):
+            if i == 8:  # This is position 9 (0-indexed)
+                # This character is already fixed and is NOT ambiguous
+                prefix_options.append([c])
+
+            # --- MODIFIED PART ---
+            # Apply TWO-WAY ambiguous logic for *all other* prefix chars
+            elif c == "B":
+                prefix_options.append(["B", "8"])
+            elif c == "8":
+                prefix_options.append(["8", "B"])
+            elif c == "S":
+                prefix_options.append(["S", "5"])
+            elif c == "5":
+                prefix_options.append(["5", "S"])
+            elif c == "T":
+                prefix_options.append(["T", "1"])
+            elif c == "1":
+                prefix_options.append(["1", "T"])
+            else:
+                # Not an ambiguous character
+                prefix_options.append([c])
+            # --- END MODIFIED PART ---
+
+        # Suffix logic: ONE-WAY fixes using the OCR_FIXES map
+        suffix_options = [[OCR_FIXES.get(c, c)] for c in suffix]
+
+        # 7. Run the iterator (unchanged)
         tried = 0
         for pre in itertools.product(*prefix_options):
             for suf in itertools.product(*suffix_options):
                 candidate = "".join(pre) + "".join(suf)
                 tried += 1
-                if VINProcessor.validate_vin(candidate):
+                if VINProcessor.validate(candidate):
                     return candidate
                 if tried >= max_combinations:
                     return None
@@ -84,14 +119,14 @@ class VINProcessor:
         return None
 
     @staticmethod
-    def validate_vin(vin: str) -> bool:
+    def validate(vin: str) -> bool:
         """
         Validates a VIN using strict structural and checksum rules.
 
         VIN Structure:
         - Position 1-3: WMI (World Manufacturer Identifier)
         - Position 4-8: VDS (Vehicle Descriptor Section)
-        - Position 9: Check digit (0-9 or X)
+        - Position 9: Check digit (0-9, X, or Z)
         - Position 10: Model year (specific valid codes)
         - Position 11: Plant code
         - Position 12: First serial digit (can be letter for high-volume mfrs)
@@ -106,15 +141,16 @@ class VINProcessor:
         if any(c in "IOQ" for c in vin):
             return False
 
-        # Position 9 (check digit) must be 0-9 or X
-        if vin[8] not in "0123456789X":
+        # Position 9 (check digit) must be 0-9, X, or Z
+        if vin[8] not in "0123456789XZ":
             return False
 
         # Position 10 (model year) - valid year codes
         # A-H, J-N, P, R-Y = 1980-2009, 2010-2039 (cycles every 30 years)
         # 1-9 = 2001-2009, 2031-2039
         # Excludes: I, O, Q, U (U rarely used), Z (rarely used)
-        valid_year_codes = "ABCDEFGHJKLMNPRSTUVWXY123456789"
+        # 0 for whatever it means
+        valid_year_codes = "ABCDEFGHJKLMNPRSTUVWXY1234567890"
         if vin[9] not in valid_year_codes:
             return False
 
@@ -133,6 +169,10 @@ class VINProcessor:
         # Position 1-3 (WMI) should be alphanumeric
         if not vin[0:3].isalnum() or vin[0:3] not in wmi_codes:
             return False
+
+        # Rest-of-World VIN, checksum "not used"
+        if vin[8] == "Z":
+            return True
 
         # Standard VIN transliteration table for checksum
         trans = {
@@ -174,8 +214,7 @@ class VINProcessor:
                 return False
             checksum += value * weights[pos]
 
-        # Calculate expected check digit
+        # Verify check digit matches position 9
         check_digit = "X" if (checksum % 11) == 10 else str(checksum % 11)
 
-        # Verify check digit matches position 9
         return vin[8] == check_digit

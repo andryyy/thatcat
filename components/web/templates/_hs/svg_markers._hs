@@ -1,0 +1,144 @@
+behavior carMarkers(svg)
+  init
+    if not #marker-input-group
+      throw('No #marker-input-group template')
+    end
+
+    set :i to 0
+    set markers to document.createElementNS('http://www.w3.org/2000/svg', 'g')
+    add .markers to markers
+    call svg.appendChild(markers)
+
+    repeat for marker in <.init-marker/> in me
+      set markerValue to (marker.value as Object)
+      call addMarker(markerValue.x, markerValue.y, markerValue.name, markerValue.color, false)
+      remove marker
+    end
+  end
+
+  def addMarker(x, y, name, color, isDomClick)
+    set markersGroup to first .markers in svg
+    increment :i
+    if y is undefined or y is undefined
+      exit
+    end
+
+    if isDomClick is not false
+      set pt to svg.createSVGPoint()
+      set pt.x to x
+      set pt.y to y
+      call pt.matrixTransform(svg.getScreenCTM().inverse())
+        set transPt to result
+      set x to transPt.x
+      set y to transPt.y
+    end
+
+    call generateRandomHexCode() // from common._hs
+    set color to result unless color
+
+    // we have to create a svg object and append it to appear on dom change
+    set marker to document.createElementNS('http://www.w3.org/2000/svg', 'g')
+    add .marker to marker
+    set marker's @data-marker to :i
+
+    set circle to document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+    set circle@cx to x
+    set circle@cy to y
+    set circle's *fill to color
+    call marker.appendChild(circle)
+
+    set text to document.createElementNS('http://www.w3.org/2000/svg', 'text')
+    set text@x to x
+    set text@y to y - 15
+    set text's *fill to color
+    set text.textContent to name unless not name
+    call marker.appendChild(text)
+
+    call markersGroup.appendChild(marker)
+
+    render #marker-input-group with (marker: {id: :i, color: color, name: name or '', x: x, y: y})
+    put the result at the end of .marker-input-groups in me
+  end
+
+  def removeMarker(markerId)
+    remove <div[data-marker='${markerId}']/> in .marker-input-groups in me
+    remove <g.marker[data-marker='${markerId}']/> in (.markers in svg)
+  end
+
+  on confirmedButton from .marker-input-groups in me
+    if event.target matches <button[type='submit']/>
+      set markerId to (@data-marker of closest <div/> to event.target)
+      removeMarker(markerId)
+    end
+  end
+
+  on click from .marker-input-groups in me
+    if event.target matches <input[type='text']/>
+      set markerId to (@data-marker of closest <div/> to event.target)
+      get first <.marker[data-marker='${markerId}']/>
+        add .locate-object to it
+        wait 500ms
+        remove .locate-object from it
+    end
+  end
+
+  on change or keyup from .marker-input-groups in me
+    set markerId to (@data-marker of closest <div/> to event.target)
+    set markerInputGroup to closest <div/> to event.target
+    set svgMarkerText to first <.marker[data-marker='${markerId}'] text/> in (.markers in svg)
+    set svgMarkerCircle to first <.marker[data-marker='${markerId}'] circle/> in (.markers in svg)
+
+    set markerObj to {
+      id: markerId,
+      color: (value of first <input[type='color']/> in markerInputGroup),
+      name: (value of first <input[type='text']/> in markerInputGroup) or '',
+      x: svgMarkerCircle@cx,
+      y: svgMarkerCircle@cy
+    }
+    set textContent of svgMarkerText to markerObj.name
+    set *fill of svgMarkerText to markerObj.color
+    set *fill of svgMarkerCircle to markerObj.color
+    set (value of first <input[type='hidden']/> in markerInputGroup) to markerObj as JSON
+  end
+
+  on submit or keydown[keyCode == 13] from .marker-input-groups in me
+    halt the event
+    exit
+  end
+
+  on pointerdown from <svg/> in me // move marker
+    get closest .marker to event.target
+      if it
+        set svgMarker to it
+        set svgMarkerId to svgMarker's @data-marker
+        set markerObj to (value of first <div[data-marker='${svgMarkerId}'] > input[name='car_markers']/> in .marker-input-groups in me) as Object
+        wait for pointerup or 100ms
+        if the result's type is not 'pointerup'
+          set :grabbing to 'grabbing'
+          add .grabbing to svgMarker
+          wait for pointerdown
+          remove .grabbing from svgMarker
+          call addMarker(result.clientX, result.clientY, markerObj.name, markerObj.color, true)
+          removeMarker(svgMarkerId)
+          set :grabbing to 'dropped'
+        end
+      end
+  end
+
+  on click from <svg/> in me
+    halt the event
+    if :grabbing is 'dropped'
+      set :grabbing to false
+      exit
+    end
+    exit unless not :grabbing
+    get closest .marker to event.target
+      if it
+        set markerId to its @data-marker
+        get first <div[data-marker='${markerId}'] > input[type='text']/> in me
+          call it.focus()
+          exit
+      end
+    call addMarker(event.clientX, event.clientY, undefined, undefined, true)
+  end
+end

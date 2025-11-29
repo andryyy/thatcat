@@ -1,28 +1,28 @@
-<div id="processings" hx-swap="outerHTML" hx-get="/processings" hx-trigger="removeProcessing, reloadProcessings">
-  {% if data.total > 0 %}
-  <span><mark>{{ data.total }}</mark> {{ L["Element"] if data.total == 1 else L["Elements"] }}</span>
-  <section class="hide-below-md">
-    🔎
-    <a href="#" _="on click
+{% if data.total > 0 %}
+<section>
+  <mark>{{ data.total }}</mark> {{ L["Element"] if data.total == 1 else L["Elements"] }}
+  <span class="hide-below-md small">
+    | 🔎 <a href="#" _="on click
       halt the event
       add .grid-span-all to <article/> in #processings
       trigger resize on window
     end">{{ L["Larger elements"] }}</a>
     ―
-    <a href="#" _="on click
+    🔎 <a href="#" _="on click
       halt the event
       remove .grid-span-all from <article/> in #processings
       trigger resize on window
     end">{{ L["Smaller elements"] }}</a>
-  </section>
-  <div class="grid-auto-cols">
-  {% for processing in data["items"] %}
-    {% with processing=processing %}
-      {% include "processings/processing.html" %}
-    {% endwith %}
-    {% endfor %}
-  </div>
-  {% else %}
-  <article>{{ L["No elements remaining"] }}🥳</article>
-  {% endif %}
+  </span>
+</section>
+<div class="grid-auto-cols">
+{% for processing in data["items"] %}
+  {% with processing=processing %}
+    {% include "processings/processing.html" %}
+  {% endwith %}
+  {% endfor %}
 </div>
+{% else %}
+<article>{{ L["No elements remaining"] }}🥳</article>
+{% endif %}
+<span _="init put '{{ data.total }}' into #processings-count remove me end" hidden></span>

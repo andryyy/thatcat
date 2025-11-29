@@ -1,24 +1,12 @@
-import json
-import random
-
-from components.models.helpers import *
+from .credentials import Credential, CredentialAdd
+from .profile import UserProfile
+from components.models.helpers import to_str, to_int, validate_uuid_str, to_bool
 from components.utils.datetimes import ntime_utc_now, utc_now_as_str
 from components.utils.misc import ensure_list, unique_list
-from config.defaults import ACCEPT_LANGUAGES
-from dataclasses import asdict, dataclass, field, fields
-from functools import cached_property
+from dataclasses import asdict, dataclass, field, fields, replace
+from typing import Protocol
 
 USER_ACLS = ["user", "system"]
-
-
-@dataclass
-class PatchTemplate:
-    def dump_patched(self):
-        return {
-            f.name: getattr(self, f.name)
-            for f in fields(self)
-            if getattr(self, f.name) is not None
-        }
 
 
 @dataclass
@@ -42,159 +30,6 @@ class UsersPagination:
                 "sort_attr",
                 f"'sort_attr' must be string, got {type(self.sort_attr).__name__}",
             )
-
-
-@dataclass
-class Vault:
-    public_key_pem: str
-    wrapped_private_key: str
-    iv: str
-    salt: str
-
-    def __post_init__(self) -> None:
-        for f in fields(self):
-            setattr(self, f, to_str(getattr(self, f)))
-
-
-@dataclass
-class TokenConfirmation:
-    confirmation_code: int | str
-    token: str
-
-    def __post_init__(self) -> None:
-        self.confirmation_code = "%06d" % to_int(self.confirmation_code)
-        self.token = to_str(self.token.strip())
-        if len(self.token) != 14:
-            raise ValueError("token", "'token' has wrong length")
-
-
-@dataclass
-class Authentication:
-    login: str
-    id: str | None = None
-
-    @cached_property
-    def token(self) -> str:
-        return "%04d-%04d-%04d" % (
-            random.randint(0, 9999),
-            random.randint(0, 9999),
-            random.randint(0, 9999),
-        )
-
-    def __post_init__(self) -> None:
-        self.login = to_str(self.login.strip())
-        if len(self.login) < 3:
-            raise ValueError("login", "'login' must be at least 3 characters long")
-
-        if self.id is not None:
-            self.id = validate_uuid_str(self.id)
-
-
-@dataclass
-class UserProfileData:
-    updated: str = field(default_factory=utc_now_as_str)
-    vault: Vault | dict | None = None
-    first_name: str | None = None
-    last_name: str | None = None
-    email: str | None = None
-    access_tokens: list[str | None] | str = field(default_factory=list)
-    permit_auth_requests: bool = True
-
-
-@dataclass
-class UserProfile(UserProfileData):
-    def __post_init__(self) -> None:
-        for name in ("first_name", "last_name", "email", "updated"):
-            if getattr(self, name):
-                setattr(self, name, to_str(getattr(self, name).strip()) or None)
-
-        self.access_tokens = unique_list(ensure_list(self.access_tokens))
-        if not all(
-            isinstance(item, str) and len(item) > 15 for item in self.access_tokens
-        ):
-            raise ValueError(
-                "access_tokens",
-                "Tokens in 'access_tokens' must have at least 16 characters",
-            )
-
-        self.permit_auth_requests = to_bool(self.permit_auth_requests)
-
-        if not self.vault:
-            self.vault = None
-        elif isinstance(self.vault, dict):
-            self.vault = Vault(**self.vault)
-
-        if self.email and not email_validator(self.email):
-            raise ValueError("email", "'email' must be a valid email address")
-
-
-@dataclass
-class CredentialBase:
-    updated: str
-    created: str
-
-
-@dataclass
-class CredentialData:
-    id: str | bytes
-    public_key: str
-    friendly_name: str = "New passkey"
-    sign_count: int = 0
-    active: bool = True
-    last_login: str | None = None
-
-
-@dataclass
-class Credential(CredentialData, CredentialBase):
-    def __post_init__(self):
-        if not isinstance(self.id, (str, bytes)) or self.id == "":
-            raise ValueError("id", "'id' must be a non-empty string or bytes")
-
-        if isinstance(self.id, bytes):
-            self.id = self.id.hex()
-
-        if (
-            not isinstance(self.public_key, str)
-            or to_str(self.public_key.strip()) == ""
-        ):
-            raise ValueError("public_key", "'public_key' must be a non-empty string")
-
-        if not isinstance(self.updated, str) or to_str(self.updated.strip()) == "":
-            raise ValueError("updated", "'updated' must be a non-empty string")
-
-        if not isinstance(self.created, str) or to_str(self.created.strip()) == "":
-            raise ValueError("created", "'created' must be a non-empty string")
-
-        if self.last_login is not None:
-            self.last_login = to_str(self.last_login.strip()) or None
-
-        self.sign_count = to_int(self.sign_count)
-        self.active = to_bool(self.active)
-
-        self.friendly_name = to_str(self.friendly_name.strip())
-        if not self.friendly_name:
-            self.friendly_name = "New passkey"
-
-
-@dataclass
-class CredentialPatch(CredentialData, PatchTemplate):
-    updated: str = field(default_factory=utc_now_as_str, init=False)
-    id: str = field(default=None, init=False, repr=False)
-    active: bool | None = None
-    sign_count: int | None = None
-    public_key: str | None = None
-    friendly_name: str | None = None
-
-
-@dataclass
-class CredentialAdd(CredentialData):
-    updated: str = field(default_factory=utc_now_as_str, init=False)
-    created: str = field(default_factory=utc_now_as_str, init=False)
-
-    def __post_init__(self):
-        Credential(**asdict(self))
-        if isinstance(self.id, bytes):
-            self.id = self.id.hex()
 
 
 @dataclass
@@ -269,6 +104,53 @@ class User(UserData, UserBase):
 
 
 @dataclass
+class UserAdd:
+    id: str
+    login: str
+    credentials: list[CredentialAdd]
+    active: bool = True
+    updated: str = field(default_factory=utc_now_as_str, init=False)
+    created: str = field(default_factory=utc_now_as_str, init=False)
+    doc_version: int = field(default=0, init=False)
+    profile: UserProfile | dict = field(default_factory=UserProfile)
+
+    def __post_init__(self):
+        User(**asdict(self))
+
+
+@dataclass
+class UserPatch(UserData):
+    id: str = field(default=None, init=False, repr=False)
+    login: str | None = None
+    credentials: list[Credential | CredentialAdd | dict | None] | None = None
+    acl: list[str | None] | str | None = None
+    groups: list[str | None] | str | None = None
+    active: bool | None = None
+    updated: str = field(default_factory=utc_now_as_str, init=False)
+
+    def dump_patched(self):
+        return {
+            f.name: getattr(self, f.name)
+            for f in fields(self)
+            if getattr(self, f.name) is not None
+        }
+
+    def merge(self, original: Protocol):
+        return replace(original, **self.dump_patched())
+
+
+@dataclass
+class UserSession:
+    id: str
+    login: str
+    acl: list[str]
+    cred_id: str | bytes | None = None
+    lang: str = "en"
+    profile: UserProfile | dict = field(default_factory=UserProfile)
+    login_ts: float = field(default_factory=ntime_utc_now)
+
+
+@dataclass
 class UserGroups:
     name: str
     new_name: str
@@ -288,42 +170,3 @@ class UserGroups:
         ]
         if not self.members:
             raise ValueError("members", "'members' must not be empty")
-
-
-@dataclass
-class UserAdd(UserData):
-    updated: str = field(default_factory=utc_now_as_str, init=False)
-    created: str = field(default_factory=utc_now_as_str, init=False)
-
-    def __post_init__(self):
-        User(**asdict(self))
-
-
-@dataclass
-class UserProfilePatch(UserProfileData, PatchTemplate):
-    access_tokens: list[str | None] | str | None = None
-    permit_auth_requests: bool | None = None
-    updated: str = field(default_factory=utc_now_as_str, init=False)
-
-
-@dataclass
-class UserPatch(UserData, PatchTemplate):
-    id: str = field(default=None, init=False, repr=False)
-    profile: UserProfilePatch | None = None
-    login: str | None = None
-    credentials: list[Credential | CredentialAdd | dict | None] | None = None
-    acl: list[str | None] | str | None = None
-    groups: list[str | None] | str | None = None
-    active: bool | None = None
-    updated: str = field(default_factory=utc_now_as_str, init=False)
-
-
-@dataclass
-class UserSession:
-    id: str
-    login: str
-    acl: list[str]
-    cred_id: str | bytes | None = None
-    lang: str = "en"
-    profile: UserProfile | dict = field(default_factory=UserProfile)
-    login_ts: float = field(default_factory=ntime_utc_now)

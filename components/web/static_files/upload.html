@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vanilla JS Image Cropper</title>
+    <style>
+        /* Prevent scrolling while dragging on mobile */
+        canvas { touch-action: none; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans p-4">
+
+    <div class="max-w-2xl mx-auto bg-white p-6 rounded-lg shadow-lg">
+        <h1 class="text-2xl font-bold mb-4 text-center">Raw JS Cropper</h1>
+
+        <!-- Input Section -->
+        <div class="mb-4 flex flex-col items-center gap-4">
+            <label class="block">
+                <span class="sr-only">Choose File</span>
+                <input type="file" id="fileInput" accept="image/*"
+                    class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer" />
+            </label>
+            
+            <p id="instructions" class="text-sm text-gray-500 hidden">
+                Draw a rectangle below to select the crop area.
+            </p>
+        </div>
+
+        <!-- Editor Container -->
+        <div id="editorContainer" class="hidden relative w-full border-2 border-dashed border-gray-300 bg-gray-50 rounded flex justify-center overflow-hidden">
+            <canvas id="canvas" class="max-w-full cursor-crosshair"></canvas>
+        </div>
+
+        <!-- Actions -->
+        <div id="controls" class="hidden mt-4 flex justify-center gap-4">
+            <button id="btnReset" class="px-4 py-2 text-sm bg-gray-200 hover:bg-gray-300 rounded transition">
+                Reset
+            </button>
+            <button id="btnCrop" class="px-6 py-2 text-sm bg-blue-600 text-white font-semibold rounded hover:bg-blue-700 transition shadow">
+                Crop & "Upload"
+            </button>
+        </div>
+
+        <!-- Result Preview -->
+        <div id="resultContainer" class="hidden mt-6 border-t pt-6">
+            <h3 class="font-semibold mb-2">Ready to Send (Preview):</h3>
+            <div class="flex flex-col items-center">
+                <img id="croppedImage" class="border rounded shadow-sm max-h-64 object-contain bg-gray-800" />
+                <div class="mt-2 text-xs font-mono bg-gray-100 p-2 rounded w-full break-all text-gray-600" id="blobInfo"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const editorContainer = document.getElementById('editorContainer');
+        const controls = document.getElementById('controls');
+        const resultContainer = document.getElementById('resultContainer');
+        const instructions = document.getElementById('instructions');
+        const blobInfo = document.getElementById('blobInfo');
+
+        let img = new Image();
+        let isDragging = false;
+        let startX, startY, currentX, currentY;
+        let selection = null; // {x, y, w, h}
+
+        // 1. Handle File Select
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                img = new Image();
+                img.onload = () => initCanvas();
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+
+        // 2. Initialize Canvas with Image
+        function initCanvas() {
+            // Show UI
+            editorContainer.classList.remove('hidden');
+            controls.classList.remove('hidden');
+            instructions.classList.remove('hidden');
+            resultContainer.classList.add('hidden');
+
+            // Set canvas dimensions to match image (scaled down via CSS max-width)
+            // We keep the canvas internal resolution high (up to a limit) for quality
+            canvas.width = img.width;
+            canvas.height = img.height;
+
+            // Reset selection
+            selection = null; 
+            draw();
+        }
+
+        // 3. The Drawing Loop
+        function draw() {
+            // Clear
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw original image
+            ctx.drawImage(img, 0, 0);
+
+            // If we have a selection/drag, draw the dark overlay
+            if (selection) {
+                // Darken the whole canvas
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                // "Cut out" the selected area (make it clear)
+                ctx.clearRect(selection.x, selection.y, selection.w, selection.h);
+                
+                // Redraw the image inside the clear area so it looks bright
+                ctx.drawImage(img, 
+                    selection.x, selection.y, selection.w, selection.h, // Source
+                    selection.x, selection.y, selection.w, selection.h  // Dest
+                );
+
+                // Draw border
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([6]);
+                ctx.strokeRect(selection.x, selection.y, selection.w, selection.h);
+            }
+        }
+
+        // 4. Interaction Logic (Mouse + Touch)
+        function getPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            // Calculate scale because CSS forces canvas width to be responsive
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+
+            let clientX = e.clientX;
+            let clientY = e.clientY;
+
+            // Handle Touch
+            if (e.touches && e.touches.length > 0) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            }
+
+            return {
+                x: (clientX - rect.left) * scaleX,
+                y: (clientY - rect.top) * scaleY
+            };
+        }
+
+        function startDrag(e) {
+            isDragging = true;
+            const pos = getPos(e);
+            startX = pos.x;
+            startY = pos.y;
+            selection = { x: startX, y: startY, w: 0, h: 0 };
+        }
+
+        function moveDrag(e) {
+            if (!isDragging) return;
+            e.preventDefault(); // Stop scrolling on mobile
+
+            const pos = getPos(e);
+            currentX = pos.x;
+            currentY = pos.y;
+
+            // Calculate math for rectangle (can drag backwards)
+            let w = currentX - startX;
+            let h = currentY - startY;
+            let x = startX;
+            let y = startY;
+
+            if (w < 0) { x = currentX; w = Math.abs(w); }
+            if (h < 0) { y = currentY; h = Math.abs(h); }
+
+            // Boundary checks
+            if (x < 0) x = 0;
+            if (y < 0) y = 0;
+            if (x + w > canvas.width) w = canvas.width - x;
+            if (y + h > canvas.height) h = canvas.height - y;
+
+            selection = { x, y, w, h };
+            draw();
+        }
+
+        function endDrag() {
+            isDragging = false;
+        }
+
+        // Event Listeners
+        canvas.addEventListener('mousedown', startDrag);
+        canvas.addEventListener('mousemove', moveDrag);
+        canvas.addEventListener('mouseup', endDrag);
+        
+        // Touch support
+        canvas.addEventListener('touchstart', startDrag, {passive: false});
+        canvas.addEventListener('touchmove', moveDrag, {passive: false});
+        canvas.addEventListener('touchend', endDrag);
+
+        // Reset Button
+        document.getElementById('btnReset').addEventListener('click', () => {
+            selection = null;
+            draw();
+        });
+
+        // 5. Crop & "Send" Logic
+        document.getElementById('btnCrop').addEventListener('click', () => {
+            if (!selection || selection.w === 0 || selection.h === 0) {
+                // If no selection, use whole image
+                selection = { x: 0, y: 0, w: canvas.width, h: canvas.height };
+            }
+
+            // Create a temporary canvas to hold only the cropped part
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = selection.w;
+            tempCanvas.height = selection.h;
+            const tempCtx = tempCanvas.getContext('2d');
+
+            // Draw the specific slice from the source image
+            tempCtx.drawImage(
+                img,
+                selection.x, selection.y, selection.w, selection.h, // Source rect
+                0, 0, selection.w, selection.h                      // Dest rect
+            );
+
+            // Convert to Blob (Simulating what you'd send to server)
+            tempCanvas.toBlob((blob) => {
+                // --- THIS IS WHERE YOU SEND TO SERVER ---
+                // Example: const formData = new FormData();
+                // formData.append('avatar', blob, 'image.jpg');
+                // fetch('/upload', { method: 'POST', body: formData });
+
+                // For Demo: Display result
+                const url = URL.createObjectURL(blob);
+                document.getElementById('croppedImage').src = url;
+                resultContainer.classList.remove('hidden');
+                blobInfo.textContent = `Payload size: ${(blob.size / 1024).toFixed(2)} KB | Type: ${blob.type}`;
+                
+                // Scroll to result
+                resultContainer.scrollIntoView({ behavior: 'smooth' });
+            }, 'image/jpeg', 0.9); // Quality 0.9
+        });
+
+    </script>
+</body>
+</html>
+

@@ -7,9 +7,12 @@
         trigger resize on window
       end">{{ L["Toggle size"] }} 🔎</a>
     </small>
+    <br>
+    <small>
+      Uploader: <mark>{{ request.form_options.users[processing.assigned_user].login }}</mark>
+    </small>
   </p>
 
-  <h6>{{ processing.filename|truncate(30, True, '...') }} </h6>
   <form class="create-object"
     hx-trigger="createObject throttle:200ms"
     hx-post="/objects/cars"
@@ -26,8 +29,8 @@
 
     {% if processing.metadata %}
     <fieldset>
-      <legend>{{ L["Metadata"] }}</legend>
-      <p><small>{{ L["Metadata from processor"] }}</small></p>
+      <legend>{{ L["Meta data"] }}</legend>
+      <p><small>{{ L["Meta data of the processing plugin"] }}</small></p>
       {% for meta in processing.metadata %}
       <details>
         <summary>{{ L[meta|capitalize] }}</summary>
@@ -36,7 +39,6 @@
       {% endfor %}
     </fieldset>
     {% endif %}
-
     <div class="grid-space-between">
       <button data-loading-disable _="on click trigger createObject end" _="install buttonCheckHtmxResponse">{{ L["Create"] }}</button>
       <button data-loading-disable class="button-red" _="install confirmButton
@@ -50,16 +52,16 @@
 
   <form class="remove-object"
     hx-trigger="removeObject"
-    hx-vals='{"id": "{{ processing.id }}", "reason": "abort"}'
-    hx-post="/processings/processing/finalize">
+    hx-vals='{"reason": "abort"}'
+    hx-post="/processings/finalize/{{ processing.id }}">
   </form>
 
   <form class="complete-object"
     hx-trigger="completeObject"
-    hx-vals='{"id": "{{ processing.id }}", "reason": "completed"}'
-    hx-post="/processings/processing/finalize">
+    hx-vals='{"reason": "completed"}'
+    hx-post="/processings/finalize/{{ processing.id }}">
   </form>
 
-  <a href="#" hx-get="/processings/processing/{{ processing.id }}" hx-select="#processing-{{ processing.id }}" hx-target="#processing-{{ processing.id }}" hx-swap="outerHTML"
+  <a href="#" hx-get="/processings/item/{{ processing.id }}" hx-select="#processing-{{ processing.id }}" hx-target="#processing-{{ processing.id }}" hx-swap="outerHTML"
     class="text-underline color-indigo changed" hidden>{{ L["Discard changes and reload"] }}?</a>
 </article>

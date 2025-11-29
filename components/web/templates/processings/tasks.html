@@ -1,7 +1,21 @@
 {% if QUEUED_USER_TASKS %}
-  <p aria-busy="true" _="init set $tasks to {{ QUEUED_USER_TASKS|length }} wait 1s then fetch '/processings/tasks' put result into #tasks">
-    Verarbeite <b>{{ QUEUED_USER_TASKS|length }}</b> Dateien
-  </p>
+  <span class="color-blue small" aria-busy="true"
+    _="init
+      set $tasks to {{ QUEUED_USER_TASKS|length }}
+      wait 1s
+      fetch '/processings/tasks'
+        put result into #tasks
+    end">
+    {{ L["processing"]|capitalize }} ({{ QUEUED_USER_TASKS|length }})...
+  </span>
 {% else %}
-  <p _="init if $tasks set $tasks to 0 trigger reloadProcessings on #processings">✅ Keine Hintergrundaufgaben</p>
+  <span class="small"
+    _="init
+      if $tasks
+        set $tasks to 0
+        trigger reloadProcessings on #processings
+      end
+    end">
+  </span>
 {% endif %}
+<span _="init put '{{ processings_count }}' into #processings-count remove me end" hidden></span>

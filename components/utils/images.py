@@ -8,6 +8,7 @@ def convert_image_to_webp(
     save_as: str | None = None,
     max_width: int = 0,
     quality: int = 85,
+    loseless: bool = True,
 ) -> bytes | None:
     logger.info("Compressing image to webp")
     if isinstance(image, bytes):
@@ -23,9 +24,9 @@ def convert_image_to_webp(
         img = img.convert("RGB")
 
     if save_as:
-        img.save(save_as, format="WEBP", quality=quality, lossless=True)
+        img.save(save_as, format="WEBP", quality=quality, lossless=loseless)
         return None
     else:
         buffer = BytesIO()
-        img.save(buffer, format="WEBP", quality=quality, lossless=True)
+        img.save(buffer, format="WEBP", quality=quality, lossless=loseless)
         return buffer.getvalue()

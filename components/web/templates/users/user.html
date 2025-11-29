@@ -2,16 +2,6 @@
   {% extends "base.html" %}
 {% endif %}
 
-{% block breadcrumb %}
-<nav aria-label="breadcrumb" id="nav-breadcrumb" hx-swap-oob="true">
-  <ul>
-    <li><span>{{ L["System"] }}</span></li>
-    <li><a href="#" hx-target="#body-main" hx-get="{{ request.path }}">{{ L["Users"] }}</a></li>
-    <li><a href="#" hx-target="#body-main" hx-get="/users/{{ user.id }}">{{ user.login }}</a></li>
-  </ul>
-</nav>
-{% endblock breadcrumb %}
-
 {% block body %}
 
 <section class="grid split-grid">
@@ -22,17 +12,15 @@
     </hgroup>
   </article>
 
-  <div id="#user-{{ user.id }}-details"
-    hx-trigger="reloadUserForm"
+  <div id="user-{{ user.id }}-details"
+    hx-trigger="htmx:afterRequest[event.detail.successful==true] from:#user-{{ user.id }}-form"
     hx-target="this"
     hx-select="#user-{{ user.id }}-details"
     hx-select-oob="#user-{{ user.id }}-login"
     hx-swap="outerHTML"
     hx-get="/users/{{ user.id }}">
 
-    <form
-      _="on htmx:afterRequest[event.detail.successful==true] from me trigger reloadUserForm on #user-{{ user.id }}-details"
-      id="user-{{ user.id }}-form"
+    <form id="user-{{ user.id }}-form"
       hx-trigger="submit throttle:200ms"
       hx-patch="/users/{{ user.id }}"
       hx-vals='js:{"active":document.getElementById("active-{{ user.id }}").checked}'>

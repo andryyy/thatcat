@@ -1,6 +1,5 @@
-import asyncio
 import os
-
+import sys
 from typing import Any
 
 __all__ = [
@@ -12,32 +11,34 @@ __all__ = [
 ]
 
 
-def batch(l: list, n: int):
-    _l = len(l)
+def batch(lst: list, n: int):
+    _l = len(lst)
     for ndx in range(0, _l, n):
-        yield l[ndx : min(ndx + n, _l)]
+        yield lst[ndx : min(ndx + n, _l)]
 
 
-def ensure_list(x: list | tuple | set | str | None) -> list:
-    if x:
-        if isinstance(x, (list, tuple, set)):
-            return list(x)
-        if isinstance(x, str):
-            return [x]
+def ensure_list(x: Any) -> list:
+    if isinstance(x, (list, tuple, set)):
+        return list(x)
+    if isinstance(x, (str, dict)):
+        return [x]
     return []
 
 
-def unique_list(l: list[Any]) -> list:
-    if isinstance(l, list):
-        return list(dict.fromkeys(l))
-    raise ValueError("Input is not a list")
+def unique_list(lst: list[Any] | set[Any]) -> list:
+    if isinstance(lst, list):
+        return list(dict.fromkeys(lst))
+    elif isinstance(lst, set):
+        return list(lst)
+    raise TypeError("Input is not a list or set")
 
 
-def to_unique_sorted_str_list(l: list[Any]) -> list:
-    _l = [str(x) for x in set(l) if x]
-    return sorted(_l)
+def to_unique_sorted_str_list(lst: list[Any]) -> list:
+    _lst = [str(x) for x in set(lst) if x]
+    return sorted(_lst)
 
 
 def is_path_within_cwd(path):
     requested_path = os.path.abspath(path)
-    return requested_path.startswith(os.path.abspath("."))
+    main_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+    return requested_path.startswith(main_dir)

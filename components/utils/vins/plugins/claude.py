@@ -1,14 +1,12 @@
-import asyncio
 import base64
 import json
 import re
 
-from .base import VINExtractorPlugin, DataType, VINResult, VINProcessor
-
-from components.utils.images import convert_image_to_webp
-from components.utils.requests import async_request
+from .base import DataType, VINExtractorPlugin, VINProcessor, VINResult
+from components.cluster import cluster
+from components.models.assets import Asset
 from components.models.system import SystemSettings
-
+from components.utils.requests import async_request
 from magic import Magic
 from typing import Any
 
@@ -16,7 +14,7 @@ from typing import Any
 class ClaudeExtractor(VINExtractorPlugin):
     name = "claude"
     handles = [DataType.IMAGE, DataType.DOCUMENT]
-    priority = 1
+    priority = 2
 
     IMAGE_PROMPT = """Analyze this IMAGE and extract any Vehicle Identification Number (VIN) you can find.
 Check the image very thoroughly for multiple VINs on plates, stickers, or labels.
@@ -83,20 +81,33 @@ Found in user text, appears to be from vehicle documentation"""
         self.model = settings.claude_model
         self.api_key = settings.claude_api_key
 
-    async def extract(self, data_bytes: bytes, **kwargs) -> VINResult:
+    async def extract(self, data_bytes: bytes, **kwargs) -> list[VINResult]:
         max_tokens = kwargs.get("max_tokens", 1024)
+        asset = await Asset.from_bytes(
+            data_bytes,
+            cluster=cluster,
+            overlay=None,
+            compress=True,
+            quality=90,
+            loseless=False,
+            filename=kwargs.get("filename"),
+        )
+        if asset.mime_type == "image/webp":
+            asset.filename = f"{asset.filename}.webp"
+
+        data_bytes = asset.as_bytes()
         try:
             content_type, media_type, encoded_data, prompt = await self._prepare_data(
                 data_bytes
             )
         except ValueError as e:
             return VINResult(
-                vins=[None],
+                vin=None,
                 raw_response={},
                 metadata={
                     "notes": str(e),
                 },
-                asset=None,
+                asset=asset,
             )
 
         if content_type == "text":
@@ -154,101 +165,88 @@ Found in user text, appears to be from vehicle documentation"""
             else:
                 error_notes = f"API Error ({response_status}): {str(error_info)}"
 
-            return VINResult(
-                vins=[None],
-                raw_response=response_text,
-                metadata={
-                    "notes": error_notes,
-                    "media_type": media_type,
-                    "content_type": content_type,
-                },
-                asset=None,
-            )
+            return [
+                VINResult(
+                    vin=None,
+                    raw_response=response_text,
+                    metadata={
+                        "errors": error_notes,
+                        "media_type": media_type,
+                        "content_type": content_type,
+                    },
+                    asset=asset,
+                )
+            ]
 
         content_list = response_text.get("content", [])
         if not content_list:
-            return VINResult(
-                vins=[None],
-                raw_response=response_text,
-                metadata={
-                    "notes": f"Empty response from Claude API | Type: {media_type}",
-                    "media_type": media_type,
-                    "content_type": content_type,
-                },
-                asset=None,
-            )
+            return [
+                VINResult(
+                    vin=None,
+                    raw_response=response_text,
+                    metadata={
+                        "errors": "Empty response from Claude API",
+                        "media_type": media_type,
+                        "content_type": content_type,
+                    },
+                    asset=asset,
+                )
+            ]
 
         content = content_list[0]
         usage = response_text.get("usage", {})
 
         result_data = self._parse_claude_response(content.get("text", ""))
-        vins = result_data.get("vins", [])
+        vins = set(result_data.get("vins", []))
         notes = result_data.get("notes", "")
+        vins, corrections = VINProcessor._process_candidates(vins)
 
-        processed_vins, correction_notes = VINProcessor.process_vin_candidates(vins)
+        results = []
+        for vin in vins:
+            results.append(
+                VINResult(
+                    vin=vin,
+                    raw_response=response_text,
+                    metadata={
+                        "model": response_text.get("model", "unknown"),
+                        "usage": {
+                            "input_tokens": usage.get("input_tokens", 0),
+                            "output_tokens": usage.get("output_tokens", 0),
+                        },
+                        "notes": notes,
+                        "corrections": corrections,
+                    },
+                    asset=asset,
+                )
+            )
 
-        if notes:
-            final_notes = f"{correction_notes} | Claude: {notes} | Type: {media_type}"
-        else:
-            final_notes = f"{correction_notes} | Type: {media_type}"
-
-        return VINResult(
-            vins=processed_vins or [None],
-            raw_response=response_text,
-            metadata={
-                "model": response_text.get("model", "unknown"),
-                "usage": {
-                    "input_tokens": usage.get("input_tokens", 0),
-                    "output_tokens": usage.get("output_tokens", 0),
+        return results or [
+            VINResult(
+                vin=None,
+                raw_response=response_text,
+                metadata={
+                    "model": response_text.get("model", "unknown"),
+                    "usage": {
+                        "input_tokens": usage.get("input_tokens", 0),
+                        "output_tokens": usage.get("output_tokens", 0),
+                    },
+                    "notes": notes,
                 },
-                "notes": final_notes,
-                "media_type": media_type,
-                "content_type": content_type,
-            },
-            asset=None,
-        )
+                asset=asset,
+            )
+        ]
 
     async def _prepare_data(self, data_bytes: bytes) -> tuple[str, str, str, str]:
-        try:
-            mime = Magic(mime=True)
-            media_type = mime.from_buffer(data_bytes)
-        except Exception:
-            if data_bytes.startswith(b"%PDF"):
-                media_type = "application/pdf"
-            elif data_bytes.startswith(b"PK\x03\x04"):
-                if b"word/" in data_bytes[:8192]:
-                    media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                elif b"xl/" in data_bytes[:8192]:
-                    media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                else:
-                    media_type = "application/octet-stream"
-            elif data_bytes.startswith(b"\xff\xd8\xff"):
-                media_type = "image/jpeg"
-            elif data_bytes.startswith(b"\x89PNG"):
-                media_type = "image/png"
-            elif data_bytes.startswith(b"GIF"):
-                media_type = "image/gif"
-            else:
-                media_type = "application/octet-stream"
+        mime = Magic(mime=True)
+        media_type = mime.from_buffer(data_bytes)
 
         if media_type.startswith("image/"):
-            try:
-                image_bytes = await asyncio.to_thread(
-                    convert_image_to_webp, data_bytes, quality=100
-                )
-                return (
-                    "image",
-                    "image/webp",
-                    base64.standard_b64encode(image_bytes).decode("utf-8"),
-                    self.IMAGE_PROMPT,
-                )
-            except Exception:
-                return (
-                    "image",
-                    media_type,
-                    base64.standard_b64encode(data_bytes).decode("utf-8"),
-                    self.IMAGE_PROMPT,
-                )
+            return (
+                "image",
+                media_type,
+                base64.standard_b64encode(data_bytes).decode("utf-8"),
+                self.IMAGE_PROMPT,
+            )
         elif media_type == "application/pdf":
             return (
                 "document",

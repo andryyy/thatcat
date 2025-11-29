@@ -83,14 +83,17 @@ behavior confirmButton
     halt the event
   end
   on click[event.detail==1] from me queue none
-    set x to 3
-    repeat until x == 0
-      put `{{ L["Confirm"] }} (${x}x)` into me
+    exit unless not :busy
+    set :busy to true
+    set :x to 3
+    repeat until :x == 0
+      put `{{ L["Confirm"] }} (${:x}x)` into me
       wait for a click or 1500ms
       if the result's type is 'click'
-        decrement x
+        decrement :x
       else
         put :inner into me
+        set :busy to false
         exit
       end
     end
@@ -129,6 +132,54 @@ behavior inlineHtmxRename
   on keydown[keyCode == 13] from me
     me.blur()
     halt the event
+  end
+end
+
+behavior rememberOpen(keyId)
+  init
+    add @open to me unless not localStorage.getItem(keyId)
+  end
+  on toggle
+    if I match @open
+      localStorage.setItem(keyId, 'true')
+    else
+      localStorage.removeItem(keyId)
+    end
+  end
+end
+
+behavior navTheme
+  init
+    if not localStorage.theme
+      if window.matchMedia('(prefers-color-scheme: light)').matches
+        toggleLight('light')
+      else
+        toggleLight('dark')
+      end
+    else
+      toggleLight(localStorage.theme)
+    end
+  end
+  on click from me
+    halt the event
+    if I match .light
+      toggleLight('dark')
+    else
+      toggleLight('light')
+    end
+  end
+  def toggleLight(mode)
+    if mode == 'dark'
+      set (@data-theme of <html/>) to 'dark'
+      set my @class to 'dark'
+      set localStorage.theme to 'dark'
+      put '{{ L['light'] }}' into me
+    else
+      set (@data-theme of <html/>) to 'light'
+      set my's @class to 'light'
+      set localStorage.theme to 'light'
+      put '{{ L['dark'] }}' into me
+    end
   end
 end
 
@@ -193,7 +244,7 @@ behavior addPasskey(register)
   on submit
     halt the event
     add @disabled to <button/> in me
-    postForm('/auth/register/webauthn/options', me)
+    submitForm('/auth/register/webauthn/options', me, 'POST')
     if result.ok
       call Passkeys.create(result.text() as Object, {{ WEBAUTHN_CHALLENGE_TIMEOUT * 1000 }})
       fetch '/auth/register/webauthn/verify' as response with method:'POST', body: result as JSON, headers:{content-type:'application/json'}
@@ -233,7 +284,7 @@ behavior login
   on submit
     halt the event
     add @disabled to <button/> in me
-    postForm('/auth/login/webauthn/options', me)
+    submitForm('/auth/login/webauthn/options', me, 'POST')
     if result.ok
       call Passkeys.get(result.text() as Object, {{ WEBAUTHN_CHALLENGE_TIMEOUT * 1000 }})
       fetch '/auth/login/webauthn/verify' as response with method:'POST', body: result as JSON, headers:{content-type:'application/json'}
@@ -322,13 +373,20 @@ def setCheckboxes(el, option)
   end
 end
 
+
 def postJson(url, dataObject)
   fetch `${url}` as response with method:'POST', body:dataObject as JSON, headers:{content-type:'application/json'}
   return result
 end
 
-def postForm(url, form)
+def submitForm(url, form, method)
+  set method to 'POST' unless method
   js(form) return new URLSearchParams(new FormData(form)).toString() end
-  fetch `${url}` as response with method:'POST', body: it, headers:{content-type:'application/x-www-form-urlencoded'}
+  fetch `${url}` as response with method:method, body: it, headers:{content-type:'application/x-www-form-urlencoded'}
+  return result
+end
+
+def generateRandomHexCode()
+  js return '#'+(Math.random() * 0xFFFFFF << 0).toString(16).padStart(6, '0') end
   return result
 end
