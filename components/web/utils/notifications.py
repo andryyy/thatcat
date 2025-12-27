@@ -6,13 +6,14 @@ from components.logs import logger
 
 
 def trigger_notification(
-    level: str,  # "error", "warning", "success", "user", "system"
+    level: str,
     response_code: int,
     title: str,
     message: str | tuple,
     response_body: str = "",
     duration: int = 7000,
     additional_triggers: dict = {},
+    fields: set | list = [],
 ):
     if isinstance(message, tuple):
         message, *message_params = message
@@ -27,7 +28,7 @@ def trigger_notification(
         "additional_triggers": {k: "*" for k in additional_triggers},
     }
 
-    if level in ["system", "user"]:
+    if level in ("system", "validationError"):
         logger_method = getattr(logger, "info")
     else:
         logger_method = getattr(logger, level)
@@ -48,80 +49,9 @@ def trigger_notification(
                             *message_params
                         ),
                         "duration": duration,
+                        "fields": fields,
                     },
                     **additional_triggers,
-                }
-            ),
-        },
-    )
-
-
-def validation_error(
-    errors: list = [], response_code: int = 422, message: str | None = None
-):
-    locations = []
-    if errors:
-        for loc in [_loc.get("loc") for _loc in errors if _loc.get("loc")]:
-            i = 1
-            _location = None
-            if len(loc) > 1:
-                while len(loc) > i:
-                    if not _location:
-                        if "[" not in loc[1]:
-                            _location = f"{loc[0]}.{loc[1]}"
-                        else:
-                            _location = f"{loc[0]}"
-                        i = 2
-                    else:
-                        if "[" not in str(loc[i]):
-                            # Remove locations that are also specified with an index
-                            # This prevents highlighting
-                            if isinstance(loc[i], int) and _location in locations:
-                                locations.remove(_location)
-                            _location = f"{_location}.{loc[i]}"
-                        i += 1
-                locations.append(_location)
-            else:
-                if isinstance(loc, tuple) or isinstance(loc, list):
-                    locations.append(loc[0])
-                elif isinstance(loc, str):
-                    locations.append(loc)
-
-        error_msgs = list(
-            set(
-                _loc.get("msg").removeprefix("Value error, ")
-                for _loc in errors
-                if _loc.get("msg")
-            )
-        )
-        if not error_msgs:
-            error_msgs = ["Provided data could not be validated"]
-
-    if message:
-        error_msgs = [message]
-
-    logger.error(
-        {
-            "level": "validationError",
-            "errors": errors,
-            "response_code": response_code,
-            "error_msgs": error_msgs,
-        },
-        exc_info=True,
-    )
-    return (
-        "",
-        response_code,
-        {
-            "HX-Retarget": "body",
-            "HX-Trigger": json.dumps(
-                {
-                    "notification": {
-                        "level": "validationError",
-                        "locations": locations,
-                        "message": [LANG[request.USER_LANG][e] for e in error_msgs],
-                        "duration": 7000,
-                    }
                 }
             ),
         },

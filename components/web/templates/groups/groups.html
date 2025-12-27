@@ -5,10 +5,10 @@
 
 {% block body %}
 
-<h5>Gruppen</h5>
+<h6>{{ L["Groups"] }}</h6>
 
 <details class="show-below-lg">
-  <summary>Neue Gruppe</summary>
+  <summary>{{ L["Create group"] }}</summary>
   <article>
     <form hx-disable _="on submit
         halt the event
@@ -25,7 +25,7 @@
       end">
       <fieldset>
         <input autocomplete="off" name="group" type="text" placeholder="New group name" />
-        <button type="submit">Erstellen</button>
+        <button type="submit">{{ L["Save"] }}</button>
       </fieldset>
     </form>
   </article>
@@ -34,8 +34,8 @@
 <section class="grid split-grid">
   <article class="hide-below-lg">
     <hgroup>
-      <h6>Neue Gruppe</h6>
-      <p>Eine neue Gruppe erstellen.</p>
+      <h6>{{ L["Create group"] }}</h6>
+      <p>{{ L["Create a new group"] }}</p>
     </hgroup>
     <form hx-disable _="on submit
         halt the event
@@ -52,7 +52,7 @@
       end">
       <fieldset>
         <input autocomplete="off" name="group" type="text" placeholder="New group name" />
-        <button type="submit">Erstellen</button>
+        <button type="submit">{{ L["Save"] }}</button>
       </fieldset>
     </form>
   </article>

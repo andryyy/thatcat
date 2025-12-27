@@ -1,9 +1,3 @@
-{% set header = True if not header == False %}
-{% set footer = True if not footer == False %}
-{% set delete_button = True if not delete_button == False %}
-{% set toggle_all_button = True if not toggle_all_button == False %}
-
-
 <form id="system-logs-table-search"
   hx-trigger="logsReady, keyup changed from:input[name=q] delay:100ms, submit throttle:100ms"
   hx-post="/system/logs/search"

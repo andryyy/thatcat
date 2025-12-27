@@ -1,5 +1,5 @@
 from .notifications import trigger_notification
-from quart import abort, redirect, request, session, url_for, websocket
+from quart import redirect, request, session, url_for, websocket
 from components.database import db
 from components.database.states import STATE
 from components.logs import logger
@@ -124,9 +124,14 @@ def websocket_acl(acl_type):
                         websocket._get_current_object()
                     ] = dict()
 
+                await websocket.accept()
                 return await fn(*args, **kwargs)
-            except AuthException:
-                abort(401)
+            except AuthException as e:
+                logger.warning(
+                    f"{websocket.remote_addr} - {session.get('login')}[ID={session.get('id')}] tried to access {websocket.path}: {e}"
+                )
+                await websocket.send("unauthorized")
+                await websocket.close(1008)
             finally:
                 if "login" in session:
                     for ws in STATE.ws_connections.get(session["login"], {}):
@@ -152,12 +157,8 @@ def acl(acl_type):
                 return await fn(*args, **kwargs)
 
             except AuthException as e:
-                logger.critical(e)
-                client_addr = request.headers.get(
-                    "X-Forwarded-For", request.remote_addr
-                )
                 logger.warning(
-                    f"{client_addr} - {session.get('login')}[ID={session.get('id')}] tried to access {request.path}"
+                    f"{request.remote_addr} - {session.get('login')}[ID={session.get('id')}] tried to access {request.path}: {e}"
                 )
 
                 if "hx-request" in request.headers:

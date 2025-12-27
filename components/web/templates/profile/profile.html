@@ -4,24 +4,19 @@
 
 {% block body %}
 
-<h5>{{ L["My data"] }}</h5>
-
-<article id="profile-container"
-  hx-trigger="reloadProfile"
-  hx-select="#profile-form"
+<article id="profile"
+  hx-trigger="htmx:afterRequest[event.detail.successful==true] from:#profile-form"
+  hx-select="#profile"
   hx-get="/profile/"
-  hx-target="#profile-form"
+  hx-target="this"
   hx-swap="outerHTML">
-    <h6>{{ L["Profile"] }}</h6>
     <section>
     {% for role in session.get("acl", []) %}
       <mark>{{ role }}</mark>
     {% endfor %}
     </section>
-    <form
-      _="on htmx:afterRequest[event.detail.successful==true] from me trigger reloadProfile on #profile-container"
-      id="profile-form"
-      hx-trigger="submit throttle:1s"
+    <form id="profile-form"
+      hx-trigger="submit throttle:200ms"
       hx-patch="/profile/edit?doc_version={{ user.doc_version }}">
       {% with
         schema=forms.users.profile,

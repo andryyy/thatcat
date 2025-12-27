@@ -31,5 +31,4 @@ def load_plugins():
 
 
 load_plugins()
-
 __all__ = ["EXTRACTORS"]

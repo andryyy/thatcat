@@ -19,10 +19,12 @@ class GoogleVisionExtractor(VINExtractorPlugin):
 
     def __init__(self, settings: SystemSettings, feature_types: list = None):
         if not isinstance(settings, SystemSettings):
-            raise ValueError("'settings' must be SystemSettings")
+            raise ValueError("settings", "'settings' must be SystemSettings")
 
         if not settings.google_vision_api_key:
-            raise ValueError("'google_vision_api_key' must not be empty")
+            raise ValueError(
+                "google_vision_api_key", "'google_vision_api_key' must not be empty"
+            )
 
         self.api_key = settings.google_vision_api_key
         self.feature_types = feature_types or ["TEXT_DETECTION"]
@@ -35,12 +37,14 @@ class GoogleVisionExtractor(VINExtractorPlugin):
             compress=True,
             quality=90,
             loseless=False,
-            filename=kwargs.get("filename"),
+            filename=kwargs.get("filename") + ".webp",
         )
-        asset.filename = f"{asset.filename}.webp"
         img = Image.open(f"assets/{asset.id}")
         image_width, image_height = img.size
-        image_data = base64.standard_b64encode(data_bytes).decode("utf-8")
+
+        image_data = base64.standard_b64encode(data_bytes).decode(
+            "utf-8"
+        )  # original bytes
 
         request_response = await async_request(
             f"https://vision.googleapis.com/v1/images:annotate?key={self.api_key}",

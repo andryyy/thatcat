@@ -41,7 +41,7 @@ async def user_profile_patch():
 
         trigger = {}
         if session["profile"]["vault"] != profile_dict["vault"]:
-            trigger = {"profileUpdate": {"vault": profile_dict["vault"]}}
+            trigger = {"vaultUpdate": {"data": profile_dict["vault"]}}
 
         session["profile"]["vault"] = profile_dict["vault"]
         await db.patch(

@@ -118,8 +118,10 @@ behavior carMarkers(svg)
           add .grabbing to svgMarker
           wait for pointerdown
           remove .grabbing from svgMarker
-          call addMarker(result.clientX, result.clientY, markerObj.name, markerObj.color, true)
-          removeMarker(svgMarkerId)
+          if (closest <svg/> to result.target) is (first <svg/> in me)
+            call addMarker(result.clientX, result.clientY, markerObj.name, markerObj.color, true)
+            removeMarker(svgMarkerId)
+          end
           set :grabbing to 'dropped'
         end
       end

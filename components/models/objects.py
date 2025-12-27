@@ -251,7 +251,7 @@ model_meta = {
             "cars": ["vin", "assigned_project"],
             "projects": ["name"],
         },
-        "display_attr": {
+        "display_attr": {  # default is 'name'
             "cars": "vin",
         },
         "system_fields": {

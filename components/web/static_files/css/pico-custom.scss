@@ -60,7 +60,7 @@
   --pico-line-height: 1.375;
   --pico-border-radius: .25rem;
   --pico-typography-spacing-vertical: 1.2rem;
-  --pico-grid-column-gap: calc(var(--pico-spacing)/2);
+  --pico-grid-column-gap: calc(var(--pico-spacing)/1.5);
   --pico-grid-row-gap: calc(var(--pico-spacing)/2);
   --pico-card-background-color: rgb(110 110 110 / 5%) !important;
   --pico-box-shadow: 1px 1px var(--pico-dropdown-border-color),
@@ -293,7 +293,7 @@ table td > button {
 /*
 # Notifications
 */
-#notification-container {
+#notifications {
   position: fixed;
   left: .25rem;
   bottom: .25rem;
@@ -302,9 +302,6 @@ table td > button {
 }
 .notification:not(:last-child) {
   margin-bottom: .25rem;
-}
-.notification-text {
-  white-space: pre-line;
 }
 .notification {
   cursor: pointer;
@@ -317,36 +314,39 @@ table td > button {
   background-blend-mode: color-burn;
   padding-left: calc(var(--pico-form-element-spacing-vertical) * 2 + calc(var(--pico-spacing) * 1.5));
 }
-.notification-error {
+.notification.error {
   --pico-background-color: #{$red-600};
   --pico-icon: var(--pico-icon-invalid);
   --pico-color: #{$red-50};
 }
-.notification-warning {
+.notification.warning {
   --pico-background-color: #{$yellow-50};
   --pico-icon: var(--pico-icon-invalid);
   --pico-color: #{$yellow-900};
 }
-.notification-success {
+.notification.success {
   --pico-background-color: #{$green-550};
   --pico-icon: var(--pico-icon-valid);
   --pico-color: #{$slate-50};
 }
-.notification-user {
+.notification.user {
   --pico-background-color: #{$azure-450};
   --pico-icon: var(--pico-icon-chevron);
   --pico-color: #{$slate-50};
 }
-.notification-title {
-  font-weight: bold;
-}
-.notification-system > .notification-title:before {
-  content:"\1F4E2\0020 Broadcast:\0020";
-}
-.notification-system {
+.notification.system {
   --pico-background-color: #{$fuchsia-800};
   --pico-icon: var(--pico-icon-chevron);
   --pico-color: #{$fuchsia-100};
+}
+.notification > .title {
+  font-weight: bold;
+}
+.notification > .text {
+  white-space: pre-line;
+}
+.notification.system > .title:before {
+  content:"\1F4E2\0020 Broadcast:\0020";
 }
 
 article.login-mask  {
@@ -387,6 +387,9 @@ dialog > :first-child {
   grid-column: span 5;
 }
 .grid.split-grid > *:first-child {
+  hgroup:last-child {
+    margin-bottom: 0;
+  }
   grid-column: span 1;
 }
 .grid-space-between {
@@ -437,11 +440,9 @@ dialog > :first-child {
 .car-wrapper {
   display: grid;
 }
-.car-wrapper > svg > g:first-of-type {
-  fill: $zinc-200;
-}
 .car-wrapper > svg {
   width: 95%;
+  max-width: 750px;
   height: auto;
   justify-self: center;
   cursor: crosshair;
@@ -453,24 +454,26 @@ dialog > :first-child {
 }
 .car-wrapper > svg .marker > text {
   text-anchor: middle;
-  font-weight: bold;
 }
 .car-wrapper > svg .marker > circle {
   r: 8pt;
   stroke: #fff;
   stroke-width: 2;
 }
-
 .car-wrapper > svg .marker.grabbing > circle {
-  r: 24pt;
-  opacity: 0.5;
+  r: 16pt;
+  opacity: 0.4;
 }
 .car-wrapper > svg .marker.grabbing {
   cursor: grabbing;
 }
 
+header nav {
+  align-items: center;
+}
+
 header nav .logo > svg {
-  width: 100%;
+  height: 100%;
   max-width: 5rem;
 }
 
@@ -572,7 +575,7 @@ hgroup ol, hgroup ul {
   dialog > :first-child {
     max-width: 95%;
   }
-  #notification-container {
+  #notifications {
     left: 0;
     bottom: 0;
     width: 100%;

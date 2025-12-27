@@ -53,7 +53,7 @@
             <small>{{ L["System"] }}</small>
           </li>
           <li>
-            <a href="#" hx-get="/system/logs">{{ L["Logs"] }}</a>
+            <a href="#" hx-get="/system/logs">{{ L["System logs"] }}</a>
           </li>
           <li>
             <a href="#" hx-get="/system/settings">{{ L["Settings"] }}</a>
@@ -91,11 +91,9 @@
 </nav>
 
 <div class="grid-space-between" id="nav-meta">
-  <div>
-    {% if session["login"] %}{{ L["Connection"] }} {% endif %}<span id="ws-indicator" hx-swap-oob="outerHTML"></span>
-    <div hx-target="#body-main">
-      {% if session["login"] %}{{ L["Path"] }} {% endif %}<span id="ws-path"></span>
-    </div>
+  <div hx-ext="ignore:loading-states">
+    <span id="ws-indicator"></span>
+    <span id="ws-path"></span>
   </div>
   <div>{{ L["Theme"] }}: <a href="#" _="install navTheme"></a></div>
 </div>

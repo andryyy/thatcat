@@ -3,6 +3,7 @@ import json
 import random
 from components.database.states import STATE
 from components.database import db
+from components.logs import logger
 
 
 async def cli_processor(streams: tuple[asyncio.StreamReader, asyncio.StreamWriter]):
@@ -21,7 +22,7 @@ async def cli_processor(streams: tuple[asyncio.StreamReader, asyncio.StreamWrite
                         )
                     if user:
                         user = user[0]
-                        if "system" not in user["acl"]:
+                        if "system" not in user.get("acl", []):
                             STATE.promote_users.add(user["id"])
                             writer.write(b"\x01")
                         else:
@@ -29,6 +30,7 @@ async def cli_processor(streams: tuple[asyncio.StreamReader, asyncio.StreamWrite
                     else:
                         writer.write(b"\x03")
                 except Exception as e:
+                    logger.error(e, exc_info=True)
                     writer.write(b"\x03")
                 await writer.drain()
             elif cmd == b"\x98":
@@ -55,6 +57,5 @@ async def cli_processor(streams: tuple[asyncio.StreamReader, asyncio.StreamWrite
         ]:
             raise
     finally:
-        print(111)
         writer.close()
         await writer.wait_closed()

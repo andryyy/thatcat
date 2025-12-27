@@ -68,13 +68,22 @@ class User(UserData, UserBase):
         if not all(isinstance(item, str) and len(item) > 0 for item in self.groups):
             raise ValueError("groups", "'groups' must contain non-empty strings")
 
-        self.acl = unique_list(ensure_list(self.acl))
-        if not all(acl in USER_ACLS for acl in self.acl):
-            raise ValueError("acl", "'acl' must contain a user ACL")
+        acls = unique_list(ensure_list(self.acl))
+        self.acl = []
+        for acl in acls:
+            if not acl:
+                continue
+            elif acl in USER_ACLS:
+                self.acl.append(acl)
+            else:
+                raise ValueError("acl", "'acl' must contain a user ACL")
 
         self.login = to_str(self.login.strip())
-        if len(self.login) < 3:
-            raise ValueError("login", "'login' must be at least 3 characters long")
+        if len(self.login) < 3 or "@" in self.login:
+            raise ValueError(
+                "login",
+                "'login' must be at least 3 characters long and not contain '@'",
+            )
 
         self.active = to_bool(self.active)
 

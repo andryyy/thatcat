@@ -7,37 +7,38 @@
 <section class="grid split-grid">
   <article class="hide-below-lg">
     <hgroup>
-      <h5 id="user-{{ user.id }}-login">{{ user.login }}</h5>
+      <h6 id="user-login">{{ user.login }}</h6>
       <p>{{ L["Change details of a user"] }}</p>
     </hgroup>
   </article>
 
-  <div id="user-{{ user.id }}-details"
-    hx-trigger="htmx:afterRequest[event.detail.successful==true] from:#user-{{ user.id }}-form"
+  <div id="user-details"
+    hx-trigger="htmx:afterRequest[event.detail.successful==true] from:#user-form"
     hx-target="this"
-    hx-select="#user-{{ user.id }}-details"
-    hx-select-oob="#user-{{ user.id }}-login"
+    hx-select="#user-details"
+    hx-select-oob="#user-login"
     hx-swap="outerHTML"
     hx-get="/users/{{ user.id }}">
 
-    <form id="user-{{ user.id }}-form"
+    <form id="user-form"
       hx-trigger="submit throttle:200ms"
       hx-patch="/users/{{ user.id }}"
-      hx-vals='js:{"active":document.getElementById("active-{{ user.id }}").checked}'>
+      _="on htmx:configRequest set event.detail.parameters['acl'] to '' unless length of (value of <input.user-acl:checked/>) as Array is not 0 end"
+      hx-vals='js:{"active": document.getElementById("active").checked}'>
       <section>
         <h6>{{ L["General"] }}</h6>
         <fieldset>
-          <label for="login-{{ user.id }}">{{ L["Username"] }}</label>
+          <label for="login">{{ L["Username"] }}</label>
           <input name="login"
             type="text"
-            id="login-{{ user.id }}"
+            id="login"
             value="{{ user.login }}"
             required
-            hx-on:change="document.getElementById('login-{{ user.id }}').textContent=this.value">
+            hx-on:change="document.getElementById('login').textContent=this.value">
         </fieldset>
         <fieldset>
           <label>
-            <input id="active-{{ user.id }}"
+            <input id="active"
               type="checkbox"
               role="switch" {{ "checked" if user.active }} /> {{ L["User enabled"] }}
           </label>
@@ -50,14 +51,15 @@
           {% for acl in USER_ACLS %}
           <input
             role="switch"
-            id="acl-{{- acl -}}-{{ user.id }}"
+            id="acl-{{- acl -}}"
+            class="user-acl"
             {% if session["id"] == user.id %}
             hx-on:click="!this.checked?(confirm('You are logged in as this user. Removing access may result in a broken session.')?null:event.preventDefault()):null"
             {% endif %}
-            name="acl"
             value="{{ acl }}"
+            name="acl"
             type="checkbox" {{ "checked" if acl in user.acl }}>
-          <label for="acl-{{- acl -}}-{{ user.id }}">{{ acl|capitalize }}</label>
+          <label for="acl-{{- acl -}}">{{ acl|capitalize }}</label>
           {% endfor %}
         </fieldset>
       </section>

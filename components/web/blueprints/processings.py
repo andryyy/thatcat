@@ -10,7 +10,6 @@ from components.database import db
 from components.database.states import STATE
 from components.cluster import cluster
 from components.models.processings import Processing, ProcessingAdd
-from components.models.system import SystemSettings
 from dataclasses import asdict
 
 blueprint = Blueprint("processings", __name__, url_prefix="/processings")
@@ -109,12 +108,13 @@ async def finalize_processing(processing_id):
 @acl(["user"])
 @formoptions(["projects"])
 async def process_upload():
-    async def _task(file_bytes, filename, settings):
-        vin_extractor = VINExtractor.get_extractor_for_filename(filename)
+    async def _task(file_bytes, filename):
+        vin_extractor = await VINExtractor.get_extractor_for_filename(filename)
         if not vin_extractor:
             return
 
-        results = await vin_extractor(settings).extract(file_bytes, filename=filename)
+        results = await vin_extractor.extract(file_bytes, filename=filename)
+
         async with db:
             for result in results:
                 processing_data = ProcessingAdd(
@@ -139,10 +139,6 @@ async def process_upload():
     data_files = files.getlist("files")
     text_data = form.get("text_data", "").strip()
 
-    async with db:
-        settings = await db.get("system_settings", "1")
-        settings = SystemSettings(**settings)
-
     if session["id"] not in STATE.queued_user_tasks:
         STATE.queued_user_tasks[session["id"]] = set()
 
@@ -152,19 +148,19 @@ async def process_upload():
     # Process file uploads
     for file in image_files:
         file_bytes = file.read()
-        t = asyncio.create_task(_task(file_bytes, file.filename, settings))
+        t = asyncio.create_task(_task(file_bytes, file.filename))
         STATE.queued_user_tasks[session["id"]].add(t)
         t.add_done_callback(STATE.queued_user_tasks[session["id"]].discard)
     for file in data_files:
         file_bytes = file.read()
-        t = asyncio.create_task(_task(file_bytes, file.filename, settings))
+        t = asyncio.create_task(_task(file_bytes, file.filename))
         STATE.queued_user_tasks[session["id"]].add(t)
         t.add_done_callback(STATE.queued_user_tasks[session["id"]].discard)
 
     # Process text input as virtual text/plain file
     if text_data:
         text_bytes = text_data.encode("utf-8")
-        t = asyncio.create_task(_task(text_bytes, "user_text.txt", settings))
+        t = asyncio.create_task(_task(text_bytes, "user_text.txt"))
         STATE.queued_user_tasks[session["id"]].add(t)
         t.add_done_callback(STATE.queued_user_tasks[session["id"]].discard)
 

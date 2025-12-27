@@ -11,7 +11,7 @@ from components.cluster import cluster
 class TesseractExtractor(VINExtractorPlugin):
     name = "tesseract"
     handles = [DataType.IMAGE]
-    priority = 0
+    priority = 2
 
     def __init__(self, *args, **kwargs):
         pass

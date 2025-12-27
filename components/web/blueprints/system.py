@@ -8,9 +8,10 @@ from components.database import db
 from components.models.system import SystemSettings, SystemSettingsPatch
 from components.utils.datetimes import datetime
 from components.utils.misc import batch
+from components.utils.vins.plugins import EXTRACTORS
 from components.web.utils.notifications import trigger_notification
 from components.web.utils.tables import table_search_helper
-from components.web.utils.utils import ws_htmx
+from components.web.utils.utils import ws_hyperscript
 from components.web.utils.wrappers import acl
 from dataclasses import asdict, replace
 from quart import Blueprint, render_template, request, session
@@ -20,6 +21,13 @@ blueprint = Blueprint("system", __name__, url_prefix="/system")
 LOG_LOCK = asyncio.Lock()
 APP_LOGS_FULL_PULL = dict()
 APP_LOGS_LAST_REFRESH = None
+
+EXTRACTORS_GROUPED = dict()
+for extractor in EXTRACTORS:
+    for handle in extractor.handles:
+        if handle not in EXTRACTORS_GROUPED:
+            EXTRACTORS_GROUPED[handle] = set()
+        EXTRACTORS_GROUPED[handle].add((extractor.name, extractor.priority))
 
 
 @blueprint.route("/status/refresh", methods=["POST"])
@@ -74,7 +82,10 @@ async def settings():
     else:
         system_settings = SystemSettingsPatch()
 
-    return await render_template("system/settings.html", settings=system_settings or {})
+    return await render_template(
+        "system/settings.html",
+        data={"settings": system_settings or {}, "extractors": EXTRACTORS_GROUPED},
+    )
 
 
 @blueprint.route("/logs")
@@ -196,14 +207,14 @@ async def refresh_cluster_logs():
                     )
 
         if cluster.peers.get_offline_peers():
-            await ws_htmx(
+            await ws_hyperscript(
                 session["login"],
-                "beforeend",
-                '<div hidden _="on load trigger '
-                + "notification("
-                + "title: 'Offline peers', level: 'warning', "
-                + "message: 'One or more peers seem to be offline and were not pulled', duration: 3000)\">"
-                + "</div>",
+                """trigger notification(
+                    title: 'Offline peers',
+                    level: 'warning',
+                    message: 'One or more peers seem to be offline and were not pulled',
+                    duration: 3000
+                ) on body""",
                 "/system/logs",
             )
 

@@ -23,6 +23,7 @@ hypercorn_config.server_names = defaults.HOSTNAME
 hypercorn_config.ciphers = "ECDHE+AESGCM"
 hypercorn_config.shutdown_timeout = 0.5
 hypercorn_config.graceful_timeout = 0.75
+hypercorn_config.trusted_hops = 0  # n of hops to trust if proxied
 
 app.stop_event = asyncio.Event()
 
@@ -57,7 +58,9 @@ async def main():
         async with asyncio.TaskGroup() as tg:
             db.cluster = cluster
             web_server = serve(
-                ProxyFixMiddleware(app, mode="legacy", trusted_hops=1),
+                ProxyFixMiddleware(
+                    app, mode="legacy", trusted_hops=hypercorn_config.trusted_hops
+                ),
                 hypercorn_config,
                 shutdown_trigger=app.stop_event.wait,
             )

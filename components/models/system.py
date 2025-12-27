@@ -16,6 +16,7 @@ class SystemSettingsData:
     claude_model: str | None = CLAUDE_DEFAULT_MODEL
     claude_api_key: str | None = None
     google_vision_api_key: str | None = None
+    extractor_priority_overrides: dict | None = None
 
 
 @dataclass

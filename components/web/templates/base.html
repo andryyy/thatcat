@@ -15,6 +15,8 @@
       document.documentElement.dataset.theme = theme;
     </script>
     <script type="text/hyperscript" src="/_hs/common._hs" defer></script>
+    <script type="text/hyperscript" src="/_hs/notifications._hs" defer></script>
+    <script type="text/hyperscript" src="/_hs/ws._hs" defer></script>
     <script type="text/hyperscript" src="/_hs/leaflet._hs" defer></script>
     <script type="text/hyperscript" src="/_hs/vault._hs" defer></script>
     <script type="text/hyperscript" src="/_hs/svg_markers._hs" defer></script>
@@ -35,43 +37,39 @@
 
     <footer>
     {% block footer %}
-      {% if session["login"] %}
-      <div hx-ext="ws" ws-connect="/ws" _="
-        init
-          set :wsValue to (<input[name]/> in me)
-          set value of :wsValue to location.pathname
-        end
-        on load 1
-          repeat forever
-            trigger wsSendPath on body
-            wait 3s
-          end
-        end
-        on htmx:historyCacheHit from body
-          set value of :wsValue to location.pathname
-          trigger wsSendPath on body
-        end
-        on htmx:beforeRequest[event.detail.requestConfig.verb=='get'] from body
-          set value of :wsValue to event.detail.requestConfig.path
-          trigger wsSendPath on body
-        end
-        on htmx:afterRequest from body
-          set value of :wsValue to location.pathname
-          trigger wsSendPath on body
-        end
-      ">
-        <input ws-send name="path" value="" id="ws-path" hx-trigger="wsSendPath from:body" type="hidden" />
-        <div id="ws-recv"></div>
-      </div>
-      {% endif %}
-      {% include "includes/notifications.html" %}
+      <div id="notifications" _="install notifications"></div>
       <dialog id="img-zoom" _="on click
         if event.target is in me
         put '' into me
         remove @open from me
         remove .no-interaction from body
       end"></dialog>
+      {% if session["login"] %}
+      <div id="ws-main" _="install wsHandler"></div>
+      {% endif %}
     {% endblock %}
     </footer>
   </body>
 </html>
+
+<template id="notification-template">
+  <div class="notification ${colorClass}" _="
+    init
+      wait ${duration}ms transition my opacity to 0 over 200ms remove me
+    end
+    on dblclick
+      transition my opacity to 0 over 100ms
+      remove me
+    end">
+    <span class="title">${title}</span><br>
+    @if level is in ['error', 'warning', 'validationError'] set bullet to '&#10071;' end
+    @if message is a Array
+      @repeat for m in message
+      <span class="text">${bullet} ${m}</span><br>
+      @end
+    @else
+      <span class="text">${bullet} ${message}</span><br>
+    @end
+  </div>
+</template>
+

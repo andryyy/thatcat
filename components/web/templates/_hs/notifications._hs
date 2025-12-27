@@ -1,0 +1,44 @@
+behavior notifications
+  init
+    put '' into me
+    set $notificationColorMapping to {
+      'error': 'error',
+      'validationError': 'warning',
+      'warning': 'warning',
+      'success': 'success',
+      'user': 'user',
+      'system': 'system'
+    }
+  end
+
+  on notification from body
+    set notificationData to event.detail
+    set fields to notificationData.fields or []
+
+    if notificationData.level == 'validationError'
+      if length of fields > 0
+        if (closest <form/> to event's target)
+          repeat for field in fields
+            set list_data to field.match('(.*)\\.([0-9]+)')
+            if list_data
+              set list_idx to list_data[2]
+              set list_name to list_data[1]
+              add [@aria-invalid=true] to (<[name=`${list_name}`]/> in closest <form/> to event's target as Array)[list_idx]
+            else
+              add [@aria-invalid=true] to <[name=`${field}`]/> in closest <form/> to event's target
+            end
+          end
+        end
+      end
+    end
+
+    render #notification-template with (
+      title: notificationData.title,
+      message: notificationData.message,
+      colorClass: $notificationColorMapping[notificationData.level],
+      duration: notificationData.duration or 7000,
+      level: notificationData.level
+    )
+      put it at the end of #notifications
+  end
+end

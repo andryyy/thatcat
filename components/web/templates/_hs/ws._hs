@@ -1,0 +1,40 @@
+behavior wsHandler
+  socket wSocket /ws
+    on message
+      if message is 'unauthorized'
+        put '' into #ws-indicator
+        put '' into #ws-path
+        exit
+      else if message is 'connected'
+        put '&#128994;' into #ws-indicator
+        put '' into #ws-path
+      else
+        _hyperscript(message)
+      end
+      set #ws-main.wsInit to true
+  end
+  init
+    set :currentPath to location.pathname
+    log 'wisInit completed'
+  end
+  on reconnecting
+    put '<span aria-busy="true"></span>' into #ws-indicator
+  end
+  on load 1
+    repeat while #ws-main.wsInit is not true
+      wait 100ms
+    end
+    repeat forever
+      send pathUpdate(path: :currentPath) to wSocket
+      wait 3s
+    end
+  end
+  on htmx:historyCacheHit from body or htmx:afterRequest from body
+    set :currentPath to location.pathname
+    send pathUpdate(path: location.pathname) to wSocket
+  end
+  on htmx:beforeRequest[event.detail.requestConfig.verb=='get'] from body
+    set :currentPath to event.detail.requestConfig.path
+    send pathUpdate(path: event.detail.requestConfig.path) to wSocket
+  end
+end

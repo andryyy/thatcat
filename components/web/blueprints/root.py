@@ -13,9 +13,11 @@ from quart import (
     session,
     url_for,
     websocket,
+    request,
 )
 from components.web.utils.wrappers import acl, session_clear, websocket_acl
 from components.web.utils.ratelimiter import RateLimiter
+from components.web.utils.utils import route_exists
 from components.cluster import cluster
 from components.cluster.files import FileGetException
 from components.models.assets import Asset
@@ -114,6 +116,9 @@ async def asset(asset_id: str, asset_filename: str, attachment: str | None = Non
 
 @blueprint.route("/logout", methods=["POST", "GET"])
 async def logout():
+    for ws in STATE.ws_connections.get(session.get("login"), {}):
+        if ws.cookies == request.cookies:
+            await ws.close(1001)
     session_clear()
     return ("", 200, {"HX-Redirect": "/"})
 
@@ -121,9 +126,7 @@ async def logout():
 @blueprint.websocket("/ws")
 @websocket_acl("any")
 async def ws():
-    await websocket.send(
-        '<span class="color-green shine" id="ws-indicator" hx-swap-oob="outerHTML">🔌</span>'
-    )
+    await websocket.send("connected")
 
     async def _shutdown_monitor():
         await current_app.stop_event.wait()
@@ -131,20 +134,29 @@ async def ws():
 
     async def _ws_handler():
         try:
+            for ws_datetime, ws_cache in STATE.ws_cache.copy().items():
+                channel, cached_data = ws_cache.values()
+                if channel == session["login"]:
+                    await websocket.send(cached_data)
+                    del STATE.ws_cache[ws_datetime]
+
             while True:
                 data = await websocket.receive()
                 data_dict = json.loads(data)
-                if "path" in data_dict:
+                if data_dict.get("type") == "pathUpdate":
                     path_plain = "/"
                     path_dom = ""
                     for part in data_dict["path"].split("/"):
                         if not part:
                             continue
                         path_plain += f"{part}/"
-                        path_dom += f'/<a href="{path_plain}">{part}</a>'
+                        if route_exists(path_plain):
+                            path_dom += f'/<a href="#" hx-target="#body-main" hx-push-url="true" hx-get="{path_plain}">{part}</a>'
+                        else:
+                            path_dom += f"/{part}"
 
                     await websocket.send(
-                        f'<div id="ws-recv" hx-swap-oob="innerHTML:#ws-path">{path_dom}</div>'
+                        f"put '{path_dom}' into #ws-path then htmx.process(#ws-path)"
                     )
                     STATE.ws_connections[session["login"]][
                         websocket._get_current_object()
@@ -152,7 +164,10 @@ async def ws():
                         "path": data_dict["path"],
                     }
         except asyncio.CancelledError:
-            await websocket.close(1001)
+            try:
+                await websocket.close(1001)
+            except RuntimeError:
+                pass
 
     try:
         async with asyncio.TaskGroup() as tg:

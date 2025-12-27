@@ -2,7 +2,7 @@
   hx-get="/auth/login/request/{{ data.request_token }}"
   hx-trigger="every 1s"
   hx-ext="ignore:loading-states">
-    <h5 aria-busy="true">{{ L["Awaiting response"] }}...</h5>
+    <h6 aria-busy="true">{{ L["Awaiting response"] }}...</h6>
     <p>
       {% if data.request_issued_to_user %}
       {{ L["A request was sent to active user sessions"] }}.<br />

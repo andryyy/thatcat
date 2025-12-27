@@ -1,22 +1,19 @@
-<dialog open id="auth-login-request" hx-ext="ignore:loading-states" _="init add .no-interaction to body end">
+<dialog open id="auth-login-request" hx-ext="ignore:loading-states" _="init htmx.process(me) add .no-interaction to body end">
   <article>
-    <header>Incoming login request</header>
-    <p>
-      Someone wants to login with your username. You can confirm or ignore the login request.
-      Please review the details below.
+    <p class="grid-space-between">
+      <b>{{ L["Incoming sign-in request"] }}</b>
+      <a href="#" _="on click halt the event remove .no-interaction from body remove closest <dialog/> end">{{ L["Discard"] }}</a>
     </p>
-    <footer>
-      <form>
-        <button
-          _="on htmx:afterRequest[event.detail.successful==true]
-            remove @open from closest <dialog/>
-            remove .no-interaction from body
-          end"
-          hx-post="/auth/login/request/confirm/internal/{{ request.view_args.get("request_token") }}">
-            Confirm
-        </button>
-        <button class="secondary" _="on click halt the event remove @open from closest <dialog/> remove .no-interaction from body end">Ignore request</button>
-      </form>
-    </footer>
+    <hr>
+    <p>{{ L["You received a sign-in request"] }}.</p>
+    <form hx-post="/auth/login/request/confirm/internal/{{ request.view_args.get("request_token") }}"
+    _="on htmx:afterRequest[event.detail.successful==true]
+      remove .no-interaction from body
+      remove closest <dialog/>
+    end">
+      <fieldset>
+        <button type="submit" class="button-green">{{ L["Confirm"] }}</button>
+      </fieldset>
+    </form>
   </article>
 </dialog>

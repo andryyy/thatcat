@@ -4,7 +4,7 @@
 
 {% block body %}
 
-<h5>System Status - <a href="#" class="no-text-decoration"
+<h6>System Status - <a href="#" class="no-text-decoration"
     hx-on:click="!window.s?s=this.textContent:null;this.textContent='👍';setTimeout(()=>{this.textContent=s}, 1000)"
     hx-target="#system-status-cards"
     hx-select="#system-status-cards"
@@ -14,7 +14,7 @@
     hx-vals="">
     ⟳ Refresh
   </a>
-</h5>
+</h6>
 
 <div id="system-status">
   <section id="system-status-cards" class="grid-auto-cols">

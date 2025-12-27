@@ -9,7 +9,7 @@
 <article class="login-mask" _="on proxyAuthSuccess from body
     put '<center>{{ L["Thank you"] }} 👍</center>' into me
   end">
-  <h5>{{ L["Confirm sign-in request"] }}</h5>
+  <h6>{{ L["Confirm sign-in request"] }}</h6>
   <p>{{ L["Authenticating as"] }} <mark>{{ login|e }}</mark></p>
   <p>{{ L["Your session, if any, will be upheld and not replaced by the current authentication process"] }}</p>
   <form _="install login">
@@ -22,7 +22,6 @@
     </fieldset>
   </form>
 </article>
-
 {% endblock body %}
 
 

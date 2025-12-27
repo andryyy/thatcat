@@ -7,11 +7,9 @@ from components.logs import logger
 from config import defaults
 from ipaddress import IPv6Address
 
-QUORUM_PERCENTAGE = 0.51  # 51% required for leader election
+QUORUM_PERCENTAGE = defaults.QUORUM_PERCENTAGE
 if defaults.DISABLE_CLUSTER_QUORUM:
-  QUORUM_PERCENTAGE = 0
-
-PREFERRED_IP_VERSION = 4  # Prefer IPv4 (4) or IPv6 (6)
+    QUORUM_PERCENTAGE = 0
 
 
 class Peers:
@@ -150,7 +148,7 @@ class Peers:
 
     async def _determine_best_ip(self, peer) -> tuple[str | None, tuple]:
         available_ips = []
-        if PREFERRED_IP_VERSION == 4:
+        if defaults.PREFERRED_IP_VERSION == 4:
             if peer.ip4:
                 available_ips.append(peer.ip4)
             if peer.ip6:

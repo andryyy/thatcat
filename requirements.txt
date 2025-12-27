@@ -3,3 +3,6 @@ jinja2
 python-magic
 pytesseract
 Pillow
+msgpack
+cbor2
+ecdsa

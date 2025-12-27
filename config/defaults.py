@@ -23,14 +23,6 @@ CLUSTER_PEERS = {
         "ip4": "2.58.53.49",
         "nat_ip4": "45.86.125.5",
     },
-    "arm-2": {
-        "ip4": "37.27.93.56",
-        "ip6": "2a01:4f9:c012:7d9d::1",
-    },
-    "4th": {
-        "ip4": "188.245.202.111",
-        "ip6": "2a01:4f8:c17:9023::1",
-    },
 }
 CLUSTER_SELF = {
     "name": "debian-4gb-nbg1-2",
@@ -42,3 +34,5 @@ CLUSTER_PEERS_TIMEOUT = 1.25
 OSM_EMAIL = "andre.peters@debinux.de"
 CLAUDE_DEFAULT_MODEL = "claude-sonnet-4-5"
 DISABLE_CLUSTER_QUORUM = False
+QUORUM_PERCENTAGE = 0.50  # 0.51
+PREFERRED_IP_VERSION = 4

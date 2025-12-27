@@ -89,6 +89,7 @@ class GlobalState:
     sign_in_tokens: LockedDict[str, str] = field(default_factory=LockedDict)
     terminal_tokens: LockedDict[str, str] = field(default_factory=LockedDict)
     ws_connections: LockedDict[str, object] = field(default_factory=LockedDict)
+    ws_cache: LockedDict[str, object] = field(default_factory=LockedDict)
 
 
 STATE = GlobalState()

@@ -14,7 +14,7 @@ from typing import Any
 class ClaudeExtractor(VINExtractorPlugin):
     name = "claude"
     handles = [DataType.IMAGE, DataType.DOCUMENT]
-    priority = 2
+    priority = 3
 
     IMAGE_PROMPT = """Analyze this IMAGE and extract any Vehicle Identification Number (VIN) you can find.
 Check the image very thoroughly for multiple VINs on plates, stickers, or labels.
@@ -72,11 +72,11 @@ Found in user text, appears to be from vehicle documentation"""
 
     def __init__(self, settings: SystemSettings):
         if not isinstance(settings, SystemSettings):
-            raise ValueError("'settings' must be SystemSettings")
+            raise ValueError("settings", "'settings' must be SystemSettings")
         if not settings.claude_model:
-            raise ValueError("'claude_model' must not be empty")
+            raise ValueError("claude_model", "'claude_model' must not be empty")
         if not settings.claude_api_key:
-            raise ValueError("'claude_api_key' must not be empty")
+            raise ValueError("claude_api_key", "'claude_api_key' must not be empty")
 
         self.model = settings.claude_model
         self.api_key = settings.claude_api_key
@@ -88,12 +88,10 @@ Found in user text, appears to be from vehicle documentation"""
             cluster=cluster,
             overlay=None,
             compress=True,
-            quality=90,
-            loseless=False,
-            filename=kwargs.get("filename"),
+            quality=900,
+            loseless=True,
+            filename=kwargs.get("filename") + ".webp",
         )
-        if asset.mime_type == "image/webp":
-            asset.filename = f"{asset.filename}.webp"
 
         data_bytes = asset.as_bytes()
         try:

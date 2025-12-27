@@ -88,11 +88,11 @@ behavior vaultDialog
     end
   end
 
-  on profileUpdate from body
+  on vaultUpdate from body
     get .vault-unlock in me
-      if event.detail.vault and its @data-vault != event.detail.vault
-        set its @data-vault to event.detail.vault
-        if event.detail.vault != "{}" and event.detail.vault != ""
+      if event.detail.data and its @data-vault != event.detail.data
+        set its @data-vault to event.detail.data
+        if event.detail.data != "{}" and event.detail.data != ""
           call window.vault.lock()
           call setLocked()
         end

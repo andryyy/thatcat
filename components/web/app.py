@@ -3,17 +3,19 @@ import json
 import random
 import string
 
-from .blueprints import root, auth, objects, profile, system, users, groups, processings
-from quart import Quart, request, session
-from components.web.utils.notifications import validation_error, trigger_notification
-from components.web.utils.utils import build_nested_dict, ws_htmx
+from .blueprints import auth, groups, objects, processings, profile, root, system, users
+from components.cluster.exceptions import ClusterException
 from components.database import db
 from components.database.states import STATE
-from components.cluster.exceptions import ClusterException
 from components.models.forms import model_forms
-from components.utils.misc import ensure_list
+from components.models.users import User
 from components.utils.lang import LANG
+from components.utils.misc import ensure_list
+from components.web.utils.notifications import trigger_notification
+from components.web.utils.utils import build_nested_dict, ws_hyperscript
 from config import defaults
+from quart import Quart, request, session
+from dataclasses import asdict
 
 app = Quart(
     __name__,
@@ -49,28 +51,48 @@ def generate_form_id(from_key: str, length=8):
 
 @app.errorhandler(ValueError)
 @app.errorhandler(TypeError)
-async def handle_input_error(error):
-    if isinstance(error.args, tuple) and len(error.args) == 2:
-        name, message = error.args
-        return validation_error(
-            [{"loc": (loc,), "msg": message} for loc in ensure_list(name) or "_"]
-        )
-    return validation_error([{"loc": [""], "msg": str(error)}])
-
-
 @app.errorhandler(ClusterException)
-async def handle_cluster_error(error):
-    await ws_htmx(
-        "system",
-        "beforeend",
-        f"<div hidden _=\"on load trigger notification(title: 'Cluster error', level: 'system', message: '{str(error)}', duration: 10000)\"></div>",
-    )
+async def handle_input_error(error):
+    if isinstance(error, ClusterException):
+        await ws_hyperscript(
+            "@system",
+            f"""trigger notification(
+                    title: 'Cluster error',
+                    level: 'system',
+                    message: '{str(error)}',
+                    duration: 10000
+                )
+            """,
+        )
+        return trigger_notification(
+            level="error",
+            response_body=""
+            if not request.headers.get("Hx-Request")
+            else f"Cluster error: {error}",
+            response_code=503,
+            title="Cluster error",
+            message=str(error),
+        )
+    elif isinstance(error.args, tuple) and len(error.args) == 2:
+        fields, message = error.args
+        return trigger_notification(
+            level="validationError",
+            response_body=""
+            if not request.headers.get("Hx-Request")
+            else f"{LANG[request.USER_LANG]['Data validation failed']}\n{LANG[request.USER_LANG][message]}\n",
+            response_code=422,
+            title=LANG[request.USER_LANG]["Data validation failed"],
+            message=LANG[request.USER_LANG][message],
+            fields=ensure_list(fields),
+        )
     return trigger_notification(
-        level="error",
-        response_body="",
-        response_code=503,
-        title="Cluster error",
-        message=str(error),
+        level="validationError",
+        response_body=""
+        if not request.headers.get("Hx-Request")
+        else f"{LANG[request.USER_LANG]['Data validation failed']}\n{LANG[request.USER_LANG][str(error)]}\n",
+        response_code=422,
+        title=LANG[request.USER_LANG]["Data validation failed"],
+        message=LANG[request.USER_LANG][str(error)],
     )
 
 
@@ -87,10 +109,24 @@ async def before_request():
         STATE.promote_users.discard(session["id"])
         async with db:
             user = await db.get("users", session["id"])
-            if "system" not in ensure_list(user["acl"]):
+            if "system" not in ensure_list(user.get("acl", [])):
+                user = User(**user)
                 user.acl.append("system")
                 session["acl"] = user.acl
                 STATE.session_validated.update({session["id"]: user.acl})
+                user_dict = asdict(user)
+                try:
+                    await db.patch("users", session["id"], {"acl": user_dict["acl"]})
+                except Exception:
+                    await ws_hyperscript(
+                        session["login"],
+                        """trigger notification(
+                                title: 'Promotion warning',
+                                level: 'warning',
+                                message: 'Promotion could not be written to database',
+                                duration: 10000
+                        )""",
+                    )
 
     if request.method in ["POST", "PATCH", "PUT", "DELETE"]:
         await modifying_request_limiter.acquire()

@@ -5,7 +5,7 @@ from components.models.auth import Authentication, TokenConfirmation
 from components.models.credentials import CredentialAdd
 from components.models.users import User, UserAdd, UserSession
 from components.utils.datetimes import utc_now_as_str
-from components.web.utils.notifications import trigger_notification, validation_error
+from components.web.utils.notifications import trigger_notification
 from components.web.utils.passkeys import (
     generate_authentication_options,
     generate_registration_options,
@@ -14,7 +14,7 @@ from components.web.utils.passkeys import (
     verify_registration_response,
     b64url_decode,
 )
-from components.web.utils.utils import ws_htmx
+from components.web.utils.utils import ws_hyperscript
 from components.web.utils.wrappers import acl, session_clear
 from config import defaults
 from dataclasses import asdict
@@ -64,11 +64,16 @@ async def login_request_confirm_modal(request_token: str):
                 request_token,
                 {
                     "status": "confirmed",
+                    "requested_login": session["login"],
                     "credential_id": "",
                 },
                 5,
             )
-            await ws_htmx(session["login"], "delete:#auth-login-request", "")
+            await ws_hyperscript(
+                session["login"],
+                "get #auth-login-request remove it unless not it",
+                "",
+            )
             return "", 204
 
         return trigger_notification(
@@ -119,10 +124,9 @@ async def login_request_start():
     )
 
     if user.profile.permit_auth_requests:
-        await ws_htmx(
+        await ws_hyperscript(
             user.login,
-            "beforeend",
-            f'<div id="auth-permit" hx-trigger="load" hx-get="/auth/login/request/confirm/internal/{request_token}"></div>',
+            f"fetch /auth/login/request/confirm/internal/{request_token} as html put the result at the end of <body/>",
         )
 
     return await render_template(
@@ -221,9 +225,7 @@ async def login_token_verify():
         token_status != "confirmed"
         or token_confirmation_code != token_confirmation.confirmation_code
     ):
-        return validation_error(
-            [{"loc": ["confirmation_code"], "msg": "Confirmation code is invalid"}]
-        )
+        raise ValueError("confirmation_code", "Confirmation code is invalid")
 
     async with db:
         user = await db.get("users", token_user_id)
